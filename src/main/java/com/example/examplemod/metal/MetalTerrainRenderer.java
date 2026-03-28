@@ -14,6 +14,7 @@ import net.minecraftforge.client.event.RenderWorldLastEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL13;
 import org.lwjgl.opengl.GL15;
@@ -314,19 +315,19 @@ public class MetalTerrainRenderer {
             double camY = cameraPos.y;
             double camZ = cameraPos.z;
 
-            // Get view matrix from event's MatrixStack
-            MatrixStack matrixStack = event.getMatrixStack();
-            Matrix4f viewMatrix = matrixStack.last().pose();
+            // Get matrices from the GL state via LWJGL, avoiding all Matrix4f reflection issues.
+            // These are the exact matrices GL is using, guaranteed correct.
+            java.nio.FloatBuffer glProjBuf = org.lwjgl.BufferUtils.createFloatBuffer(16);
+            java.nio.FloatBuffer glModelViewBuf = org.lwjgl.BufferUtils.createFloatBuffer(16);
+            GL11.glGetFloatv(GL11.GL_PROJECTION_MATRIX, glProjBuf);
+            GL11.glGetFloatv(GL11.GL_MODELVIEW_MATRIX, glModelViewBuf);
 
-            // Get projection matrix directly from GameRenderer
-            // event.getProjectionMatrix() returns NaN in RenderWorldLastEvent on Forge 36.2.34
-            Matrix4f projMatrix = mc.gameRenderer.getProjectionMatrix(
-                mc.gameRenderer.getMainCamera(),
-                event.getPartialTicks(), true);
+            float[] projArr = new float[16];
+            float[] viewArr = new float[16];
+            glProjBuf.get(projArr);
+            glModelViewBuf.get(viewArr);
 
-            // Extract and multiply manually (Matrix4f.multiply can produce NaN)
-            float[] viewArr = matrix4fToArray(viewMatrix);
-            float[] projArr = matrix4fToArray(projMatrix);
+            // GL returns column-major, which is what Metal expects. Multiply: proj * view
             float[] viewProjArr = multiplyMatrices(projArr, viewArr);
 
             // One-time diagnostic: log the matrices

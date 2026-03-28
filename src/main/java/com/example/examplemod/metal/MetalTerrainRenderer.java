@@ -631,16 +631,26 @@ public class MetalTerrainRenderer {
             ByteBuffer vertexData = getVertexData(vboId, vertexCount);
             if (vertexData == null) { diagSkipData++; continue; }
 
-            // Log first vertex position to verify VBO data
-            if (frameCount == 15 && metalRT == RT_SOLID && chunkIndex == 0 && vertexData.remaining() >= 12) {
-                int savedPos = vertexData.position();
-                float vx = vertexData.getFloat(0);
-                float vy = vertexData.getFloat(4);
-                float vz = vertexData.getFloat(8);
-                LOGGER.info("[METAL-DIAG] First vertex raw position: ({},{},{})", vx, vy, vz);
-                LOGGER.info("[METAL-DIAG] First vertex world-relative: ({},{},{})",
-                    vx + offsetX, vy + offsetY, vz + offsetZ);
-                vertexData.position(savedPos);
+            // Log first few vertex positions to verify VBO data
+            if (frameCount == 15 && metalRT == RT_SOLID && chunkIndex == 0) {
+                int dataSize = vertexCount * 32;
+                LOGGER.info("[METAL-DIAG] VBO data: {} bytes for {} vertices", dataSize, vertexCount);
+                // Also check actual GL buffer size
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, vboId);
+                int glBufSize = GL15.glGetBufferParameteri(GL15.GL_ARRAY_BUFFER, GL15.GL_BUFFER_SIZE);
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
+                LOGGER.info("[METAL-DIAG] GL buffer size: {} bytes (expected {})", glBufSize, dataSize);
+
+                // Log first 4 vertex positions (each 32 bytes stride)
+                for (int vi = 0; vi < Math.min(4, vertexCount); vi++) {
+                    int off = vi * 32;
+                    if (off + 12 <= vertexData.limit()) {
+                        float vx = vertexData.getFloat(off);
+                        float vy = vertexData.getFloat(off + 4);
+                        float vz = vertexData.getFloat(off + 8);
+                        LOGGER.info("[METAL-DIAG] Vertex[{}]: pos=({},{},{})", vi, vx, vy, vz);
+                    }
+                }
             }
 
             // Upload to Metal

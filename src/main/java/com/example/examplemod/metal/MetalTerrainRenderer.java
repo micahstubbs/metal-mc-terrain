@@ -251,6 +251,7 @@ public class MetalTerrainRenderer {
         // Initialize reflection on first call
         if (!initReflection()) return;
 
+        boolean frameStarted = false;
         try {
             long frameStart = System.nanoTime();
 
@@ -285,7 +286,7 @@ public class MetalTerrainRenderer {
             int fbWidth = mc.getWindow().getWidth();
             int fbHeight = mc.getWindow().getHeight();
 
-            boolean frameStarted = MetalBridge.terrainBeginFrame(fbWidth, fbHeight, true);
+            frameStarted = MetalBridge.terrainBeginFrame(fbWidth, fbHeight, true);
             if (!frameStarted) {
                 if (frameCount % 300 == 1) {
                     LOGGER.warn("[METAL-TERRAIN] begin_frame failed, skipping frame");
@@ -306,14 +307,6 @@ public class MetalTerrainRenderer {
                 rtCpuNanos[i] = System.nanoTime() - rtStart;
             }
 
-            // Diagnostic: log chunk counts once after first few frames
-            if (frameCount == 10) {
-                LOGGER.info("[METAL-TERRAIN] Frame {} stats: uploaded={}, cached={}, draws={}, verts={}",
-                    frameCount, chunksUploaded, chunksCached, lastMetalDrawCount, lastMetalVertexCount);
-            }
-
-            MetalBridge.terrainEndFrame();
-
             long frameEnd = System.nanoTime();
             uploadTimeNanos = frameEnd - frameStart;
 
@@ -331,6 +324,12 @@ public class MetalTerrainRenderer {
             // Catch Throwable (not just Exception) to handle UnsatisfiedLinkError etc.
             if (frameCount % 300 == 1) {
                 LOGGER.error("[METAL-TERRAIN] Frame error", e);
+            }
+        } finally {
+            // Always end the frame if it was started, even if an exception occurred.
+            // Without this, t_frameActive stays true and all future frames are skipped.
+            if (frameStarted) {
+                MetalBridge.terrainEndFrame();
             }
         }
     }

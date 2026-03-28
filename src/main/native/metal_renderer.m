@@ -12,6 +12,8 @@ static id<MTLDevice> g_device = nil;
 static id<MTLCommandQueue> g_commandQueue = nil;
 static CAMetalLayer *g_metalLayer = nil;
 static NSView *g_metalView = nil;
+static NSWindow *g_overlayWindow = nil;
+static NSWindow *g_parentWindow = nil;
 
 // Phase B: triangle pipeline
 static id<MTLRenderPipelineState> g_trianglePipeline = nil;
@@ -72,37 +74,55 @@ bool metal_renderer_init(long nsWindowPtr) {
         g_metalLayer.framebufferOnly = YES;
         g_metalLayer.opaque = NO; // transparent so GL content shows through
 
-        // Get the content view and ensure it's layer-backed
-        NSView *contentView = [window contentView];
-        NSRect bounds = contentView.bounds;
-        contentView.wantsLayer = YES;
+        // GLFWContentView uses _NSOpenGLViewBackingLayer which draws OVER any
+        // subviews/sublayers during its display cycle. Neither subview nor sublayer
+        // approaches can composite above it. Solution: a child NSWindow that
+        // composites at the window compositor level, above the GL window.
+        g_parentWindow = window;
+        NSRect contentRect = [window contentRectForFrameRect:window.frame];
+        CGFloat scale = window.backingScaleFactor;
+
+        g_overlayWindow = [[NSWindow alloc]
+            initWithContentRect:contentRect
+                      styleMask:NSWindowStyleMaskBorderless
+                        backing:NSBackingStoreBuffered
+                          defer:NO];
+        g_overlayWindow.backgroundColor = [NSColor clearColor];
+        g_overlayWindow.opaque = NO;
+        g_overlayWindow.hasShadow = NO;
+        g_overlayWindow.ignoresMouseEvents = YES;
+        g_overlayWindow.level = window.level;
+
+        // Create a layer-hosting view for the Metal layer
+        NSView *overlayContentView = g_overlayWindow.contentView;
+        overlayContentView.wantsLayer = YES;
+        overlayContentView.layerContentsRedrawPolicy = NSViewLayerContentsRedrawNever;
+
+        g_metalView = [[NSView alloc] initWithFrame:overlayContentView.bounds];
+        g_metalView.wantsLayer = YES;
+        g_metalView.layerContentsRedrawPolicy = NSViewLayerContentsRedrawNever;
+        [g_metalView setLayer:g_metalLayer];
+        g_metalView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        [overlayContentView addSubview:g_metalView];
 
         // Set layer size
-        CGFloat scale = window.backingScaleFactor;
         g_metalLayer.contentsScale = scale;
-        g_metalLayer.drawableSize = CGSizeMake(bounds.size.width * scale,
-                                                bounds.size.height * scale);
-        g_metalLayer.frame = contentView.layer.bounds;
+        NSRect viewBounds = overlayContentView.bounds;
+        g_metalLayer.drawableSize = CGSizeMake(viewBounds.size.width * scale,
+                                                viewBounds.size.height * scale);
 
-        // Add Metal layer as a SUBLAYER of the content view's layer.
-        // This ensures it composites above the GL content, which on modern macOS
-        // (layer-backed views, LWJGL 3.3.1 arm64) also renders to a sublayer.
-        // Using a sibling NSView with zPosition doesn't work because GL renders
-        // to the view's own backing layer, which is in a different layer tree.
-        [contentView.layer addSublayer:g_metalLayer];
-        g_metalLayer.zPosition = 1000;
-
-        // Also keep a reference NSView for bounds tracking (not used for layer hosting)
-        g_metalView = contentView;
+        // Attach as child window -- moves with parent, always on top
+        [window addChildWindow:g_overlayWindow ordered:NSWindowAbove];
+        [g_overlayWindow orderFront:nil];
 
         NSLog(@"[METAL] Layer size: %.0fx%.0f (scale %.1f)",
-              bounds.size.width * scale, bounds.size.height * scale, scale);
-        NSLog(@"[METAL] contentView.layer sublayers: %lu",
-              (unsigned long)contentView.layer.sublayers.count);
-        NSLog(@"[METAL] metalLayer frame: %.0f,%.0f %.0fx%.0f",
-              g_metalLayer.frame.origin.x, g_metalLayer.frame.origin.y,
-              g_metalLayer.frame.size.width, g_metalLayer.frame.size.height);
-        NSLog(@"[METAL] metalLayer zPosition: %.0f", g_metalLayer.zPosition);
+              viewBounds.size.width * scale, viewBounds.size.height * scale, scale);
+        NSLog(@"[METAL] Overlay window: %.0fx%.0f at %.0f,%.0f",
+              g_overlayWindow.frame.size.width, g_overlayWindow.frame.size.height,
+              g_overlayWindow.frame.origin.x, g_overlayWindow.frame.origin.y);
+        NSLog(@"[METAL] Parent window: %.0fx%.0f at %.0f,%.0f",
+              window.frame.size.width, window.frame.size.height,
+              window.frame.origin.x, window.frame.origin.y);
 
         // Compile shaders
         if (!metal_renderer_compile_shaders()) {
@@ -123,9 +143,12 @@ bool metal_renderer_init(long nsWindowPtr) {
 
 void metal_renderer_shutdown(void) {
     @autoreleasepool {
-        if (g_metalLayer) {
-            [g_metalLayer removeFromSuperlayer];
+        if (g_overlayWindow) {
+            [g_parentWindow removeChildWindow:g_overlayWindow];
+            [g_overlayWindow close];
+            g_overlayWindow = nil;
         }
+        g_parentWindow = nil;
         g_metalView = nil;
         g_triangleVertexBuffer = nil;
         g_trianglePipeline = nil;

@@ -397,8 +397,8 @@ public class MetalTerrainRenderer {
                 MetalBridge.terrainEndFrame();
                 blitIOSurfaceToGL();
 
-                // Automated screenshot for autonomous verification (once, at frame 20)
-                if (frameCount == 20) {
+                // Automated screenshots for autonomous verification
+                if (frameCount == 20 || frameCount == 100 || frameCount == 300) {
                     saveAutomatedScreenshot();
                 }
             }

@@ -70,12 +70,14 @@ static bool metal_renderer_create_shared_surface(int width, int height) {
     g_sharedColorTexture = nil;
 
     // Create IOSurface properties
+    // bytesPerRow must be 16-byte aligned for IOSurface
+    int bytesPerRow = ((width * 4 + 15) / 16) * 16;
     NSDictionary *props = @{
         (id)kIOSurfaceWidth: @(width),
         (id)kIOSurfaceHeight: @(height),
         (id)kIOSurfaceBytesPerElement: @(4),
         (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA'),
-        (id)kIOSurfaceBytesPerRow: @(width * 4),
+        (id)kIOSurfaceBytesPerRow: @(bytesPerRow),
     };
 
     g_ioSurface = IOSurfaceCreate((__bridge CFDictionaryRef)props);

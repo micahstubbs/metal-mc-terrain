@@ -149,8 +149,8 @@ exec "$JAVA" \
   -Dforge.logging.console.level=info \
   -Dmetal.autoload=true \
   -Dmetal.autoload.world="New World" \
-  -Dmetal.window.x=100 \
-  -Dmetal.window.y=100 \
+  -Dmetal.window.x=680 \
+  -Dmetal.window.y=25 \
   -cp "${CP#:}" \
   cpw.mods.modlauncher.Launcher \
   --launchTarget fmlclient \

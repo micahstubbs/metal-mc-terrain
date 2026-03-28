@@ -8,6 +8,8 @@ import com.example.examplemod.optimization.ChunkUploadBudgeter;
 import com.example.examplemod.overlay.ProfilerOverlay;
 import com.example.examplemod.profiler.RenderProfiler;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screen.MainMenuScreen;
+import net.minecraft.world.storage.SaveFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -32,6 +34,8 @@ public class ExampleMod {
     private static final Logger LOGGER = LogManager.getLogger();
     private boolean joinMessageSent = false;
     private boolean metalActivated = false;
+    private boolean autoLoadAttempted = false;
+    private int ticksSinceStart = 0;
 
     private ProfilerOverlay profilerOverlay;
     private KeyBinding toggleOverlayKey;
@@ -81,6 +85,24 @@ public class ExampleMod {
         if (event.phase == TickEvent.Phase.START) {
             UPLOAD_BUDGETER.onFrameStart();
             return;
+        }
+
+        ticksSinceStart++;
+
+        // Auto-load world when -Dmetal.autoload=true is set (for autonomous testing)
+        if (!autoLoadAttempted && System.getProperty("metal.autoload") != null) {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.screen instanceof MainMenuScreen && ticksSinceStart > 100) {
+                autoLoadAttempted = true;
+                String worldName = System.getProperty("metal.autoload.world", "New World");
+                LOGGER.info("[AUTO-LOAD] Loading world '{}' for autonomous testing", worldName);
+                try {
+                    SaveFormat.LevelSave levelSave = mc.getLevelSource().createAccess(worldName);
+                    mc.loadLevel(levelSave.getLevelId());
+                } catch (Exception e) {
+                    LOGGER.error("[AUTO-LOAD] Failed to load world", e);
+                }
+            }
         }
 
         // Deferred installs

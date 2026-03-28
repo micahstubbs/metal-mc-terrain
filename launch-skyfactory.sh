@@ -147,6 +147,8 @@ exec "$JAVA" \
   --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
   -Djava.library.path="$NATIVES_DIR" \
   -Dforge.logging.console.level=info \
+  -Dmetal.autoload=true \
+  -Dmetal.autoload.world="New World" \
   -cp "${CP#:}" \
   cpw.mods.modlauncher.Launcher \
   --launchTarget fmlclient \

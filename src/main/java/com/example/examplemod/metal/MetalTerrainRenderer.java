@@ -217,14 +217,15 @@ public class MetalTerrainRenderer {
                     LOGGER.info("[METAL-TERRAIN]   int field: {}", f.getName());
                 }
                 if (intFields.size() >= 2) {
-                    // field_177364_c = id (GL VBO name), field_177365_a = vertexCount
-                    // Order in getDeclaredFields may not match declaration order,
-                    // so identify by name if possible
+                    // VERIFIED via glIsBuffer + GL_BUFFER_SIZE diagnostic:
+                    // field_177365_a = VBO ID (GL buffer name) - glIsBuffer=true, has data
+                    // field_177364_c = vertex count (data_size / 32 matches)
+                    // These are REVERSED from what the SRG name mapping suggests.
                     Field idCandidate = null, countCandidate = null;
                     for (Field f : intFields) {
-                        if (f.getName().equals("field_177364_c") || f.getName().equals("id")) {
+                        if (f.getName().equals("field_177365_a") || f.getName().equals("id")) {
                             idCandidate = f;
-                        } else if (f.getName().equals("field_177365_a") || f.getName().equals("vertexCount")) {
+                        } else if (f.getName().equals("field_177364_c") || f.getName().equals("vertexCount")) {
                             countCandidate = f;
                         }
                     }
@@ -232,9 +233,9 @@ public class MetalTerrainRenderer {
                         vboIdField = idCandidate;
                         vboVertexCountField = countCandidate;
                     } else {
-                        // Fallback: first = vertexCount (usually declared first), second = id
-                        vboIdField = intFields.get(1);
-                        vboVertexCountField = intFields.get(0);
+                        // Fallback: first int = VBO ID, second = vertexCount
+                        vboIdField = intFields.get(0);
+                        vboVertexCountField = intFields.get(1);
                     }
                     LOGGER.info("[METAL-TERRAIN] vboIdField={}, vboVertexCountField={}",
                         vboIdField.getName(), vboVertexCountField.getName());

@@ -208,4 +208,7 @@ public class MetalBridge {
      * @return true if binding succeeded
      */
     public static native boolean bindIOSurfaceToGLTexture(int glTexId);
+
+    /** Debug: read a pixel from the IOSurface. Returns BGRA as int. */
+    public static native int readIOSurfacePixel(int x, int y);
 }

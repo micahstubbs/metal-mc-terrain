@@ -991,6 +991,10 @@ void metal_terrain_end_frame(void) {
         }];
 
         [t_frameCmdBuf commit];
+        // Wait for Metal GPU work to complete before returning.
+        // The caller (Java) will immediately bind the IOSurface as a GL texture,
+        // so Metal must finish writing to it first.
+        [t_frameCmdBuf waitUntilCompleted];
 
         t_frameDrawable = nil;
         t_frameCmdBuf = nil;

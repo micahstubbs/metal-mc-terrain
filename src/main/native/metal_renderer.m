@@ -407,3 +407,17 @@ bool metal_renderer_ensure_surface(int width, int height) {
 
 int metal_renderer_get_surface_width(void) { return g_surfaceWidth; }
 int metal_renderer_get_surface_height(void) { return g_surfaceHeight; }
+
+// Debug: read pixel at (x,y) from the IOSurface. Returns BGRA as uint32.
+uint32_t metal_renderer_read_pixel(int x, int y) {
+    if (!g_ioSurface) return 0;
+    if (x < 0 || x >= g_surfaceWidth || y < 0 || y >= g_surfaceHeight) return 0;
+
+    IOSurfaceLock(g_ioSurface, kIOSurfaceLockReadOnly, NULL);
+    uint8_t *base = (uint8_t *)IOSurfaceGetBaseAddress(g_ioSurface);
+    size_t bytesPerRow = IOSurfaceGetBytesPerRow(g_ioSurface);
+    uint32_t pixel = *(uint32_t *)(base + y * bytesPerRow + x * 4);
+    IOSurfaceUnlock(g_ioSurface, kIOSurfaceLockReadOnly, NULL);
+
+    return pixel;
+}

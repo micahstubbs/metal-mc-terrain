@@ -28,6 +28,7 @@ extern void metal_renderer_set_terrain_active(bool active);
 extern uint32_t metal_renderer_get_iosurface_id(void);
 extern int metal_renderer_get_surface_width(void);
 extern int metal_renderer_get_surface_height(void);
+extern uint32_t metal_renderer_read_pixel(int x, int y);
 
 // IOSurface ref for CGLTexImageIOSurface2D
 #import <IOSurface/IOSurface.h>
@@ -313,4 +314,11 @@ Java_com_example_examplemod_metal_MetalBridge_bindIOSurfaceToGLTexture(JNIEnv *e
 
         return JNI_TRUE;
     }
+}
+
+// Debug: read a pixel from the IOSurface to verify Metal rendered content
+JNIEXPORT jint JNICALL
+Java_com_example_examplemod_metal_MetalBridge_readIOSurfacePixel(JNIEnv *env, jclass cls,
+    jint x, jint y) {
+    return (jint)metal_renderer_read_pixel((int)x, (int)y);
 }

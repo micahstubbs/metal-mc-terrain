@@ -9,7 +9,6 @@ import com.example.examplemod.overlay.ProfilerOverlay;
 import com.example.examplemod.profiler.RenderProfiler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screen.MainMenuScreen;
-import net.minecraft.world.storage.SaveFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -35,6 +34,7 @@ public class ExampleMod {
     private boolean joinMessageSent = false;
     private boolean metalActivated = false;
     private boolean autoLoadAttempted = false;
+    private boolean windowPositioned = false;
     private int ticksSinceStart = 0;
 
     private ProfilerOverlay profilerOverlay;
@@ -89,6 +89,24 @@ public class ExampleMod {
 
         ticksSinceStart++;
 
+        // Set window position from system properties (for consistent positioning)
+        if (!windowPositioned && ticksSinceStart > 5) {
+            windowPositioned = true;
+            String xProp = System.getProperty("metal.window.x");
+            String yProp = System.getProperty("metal.window.y");
+            if (xProp != null && yProp != null) {
+                try {
+                    int wx = Integer.parseInt(xProp);
+                    int wy = Integer.parseInt(yProp);
+                    long windowHandle = Minecraft.getInstance().getWindow().getWindow();
+                    GLFW.glfwSetWindowPos(windowHandle, wx, wy);
+                    LOGGER.info("[WINDOW] Set position to ({}, {})", wx, wy);
+                } catch (Exception e) {
+                    LOGGER.warn("[WINDOW] Failed to set position", e);
+                }
+            }
+        }
+
         // Auto-load world when -Dmetal.autoload=true is set (for autonomous testing)
         if (!autoLoadAttempted && System.getProperty("metal.autoload") != null) {
             Minecraft mc = Minecraft.getInstance();
@@ -97,8 +115,9 @@ public class ExampleMod {
                 String worldName = System.getProperty("metal.autoload.world", "New World");
                 LOGGER.info("[AUTO-LOAD] Loading world '{}' for autonomous testing", worldName);
                 try {
-                    SaveFormat.LevelSave levelSave = mc.getLevelSource().createAccess(worldName);
-                    mc.loadLevel(levelSave.getLevelId());
+                    // Use loadLevel directly with the folder name.
+                    // This is what the singleplayer world list does internally.
+                    mc.loadLevel(worldName);
                 } catch (Exception e) {
                     LOGGER.error("[AUTO-LOAD] Failed to load world", e);
                 }

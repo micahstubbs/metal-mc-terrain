@@ -405,6 +405,9 @@ public class MetalTerrainRenderer {
                 LOGGER.info("[METAL-BLIT] Created GL texture {} for IOSurface {}", glIOSurfaceTexId, surfaceId);
             }
 
+            // Clear any pending GL errors
+            while (GL11.glGetError() != GL11.GL_NO_ERROR) {}
+
             // Bind the IOSurface to our GL texture (via native JNI call that uses CGLTexImageIOSurface2D)
             boolean bound = MetalBridge.bindIOSurfaceToGLTexture(glIOSurfaceTexId);
             if (!bound) {
@@ -412,6 +415,11 @@ public class MetalTerrainRenderer {
                     LOGGER.warn("[METAL-BLIT] Failed to bind IOSurface to GL texture");
                 }
                 return;
+            }
+
+            int err = GL11.glGetError();
+            if (err != GL11.GL_NO_ERROR && frameCount == 16) {
+                LOGGER.warn("[METAL-BLIT] GL error after IOSurface bind: 0x{}", Integer.toHexString(err));
             }
 
             // Save GL state
@@ -433,6 +441,11 @@ public class MetalTerrainRenderer {
             GL11.glDisable(GL11.GL_LIGHTING);
             GL11.glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
+            err = GL11.glGetError();
+            if (err != GL11.GL_NO_ERROR && frameCount == 16) {
+                LOGGER.warn("[METAL-BLIT] GL error after setup: 0x{}", Integer.toHexString(err));
+            }
+
             // Draw fullscreen quad
             // GL_TEXTURE_RECTANGLE uses pixel coordinates (0..w, 0..h), not normalized 0..1
             GL11.glBegin(GL11.GL_QUADS);
@@ -441,6 +454,32 @@ public class MetalTerrainRenderer {
             GL11.glTexCoord2f(w, 0);  GL11.glVertex2f(1, 1);  // top-right
             GL11.glTexCoord2f(0, 0);  GL11.glVertex2f(0, 1);  // top-left
             GL11.glEnd();
+
+            err = GL11.glGetError();
+            if (err != GL11.GL_NO_ERROR && frameCount == 16) {
+                LOGGER.warn("[METAL-BLIT] GL error after draw: 0x{}", Integer.toHexString(err));
+            }
+
+            // One-time diagnostic: verify Metal rendered to the IOSurface
+            if (frameCount == 16) {
+                // Read center pixel from IOSurface to verify Metal content
+                int cx = w / 2, cy = h / 2;
+                int pixel = MetalBridge.readIOSurfacePixel(cx, cy);
+                int b = (pixel >> 0) & 0xFF;
+                int g = (pixel >> 8) & 0xFF;
+                int r = (pixel >> 16) & 0xFF;
+                int a = (pixel >> 24) & 0xFF;
+                LOGGER.info("[METAL-BLIT] IOSurface pixel({},{}) = RGBA({},{},{},{}), raw=0x{}",
+                    cx, cy, r, g, b, a, Integer.toHexString(pixel));
+                // Also read a few more positions
+                for (int[] pos : new int[][]{{0,0},{100,100},{w/4,h/4},{w-1,h-1}}) {
+                    int p = MetalBridge.readIOSurfacePixel(pos[0], pos[1]);
+                    LOGGER.info("[METAL-BLIT] IOSurface pixel({},{}) = 0x{}",
+                        pos[0], pos[1], Integer.toHexString(p));
+                }
+                LOGGER.info("[METAL-BLIT] Blit complete: texture={}, surface={}x{}, IOSurface={}",
+                    glIOSurfaceTexId, w, h, surfaceId);
+            }
 
             // Restore GL state
             GL11.glDisable(GL_TEXTURE_RECTANGLE);

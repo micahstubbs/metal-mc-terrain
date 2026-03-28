@@ -91,8 +91,21 @@ bool metal_renderer_init(long nsWindowPtr) {
         g_metalLayer.drawableSize = CGSizeMake(bounds.size.width * scale,
                                                 bounds.size.height * scale);
 
+        // Ensure Metal layer is above GL layer in compositing order.
+        // LWJGL 3.3.1 arm64 may use a layer-backed GL view, so subview order alone
+        // is not sufficient -- we need explicit zPosition.
+        g_metalLayer.zPosition = 1000;
+
+        // Debug: log view hierarchy to verify positioning
         NSLog(@"[METAL] Layer size: %.0fx%.0f (scale %.1f)",
               bounds.size.width * scale, bounds.size.height * scale, scale);
+        NSLog(@"[METAL] contentView subviews: %lu, metalView superview: %@",
+              (unsigned long)contentView.subviews.count,
+              g_metalView.superview ? @"yes" : @"no");
+        NSLog(@"[METAL] metalView frame: %.0f,%.0f %.0fx%.0f",
+              g_metalView.frame.origin.x, g_metalView.frame.origin.y,
+              g_metalView.frame.size.width, g_metalView.frame.size.height);
+        NSLog(@"[METAL] metalLayer zPosition: %.0f", g_metalLayer.zPosition);
 
         // Compile shaders
         if (!metal_renderer_compile_shaders()) {

@@ -274,6 +274,8 @@ static bool terrain_compile_shaders(void) {
         "    sampler lightmapSampler [[sampler(1)]],\n"
         "    constant FrameUniforms& frame [[buffer(2)]]\n"
         ") {\n"
+        "    // DEBUG: force solid magenta to verify Metal pipeline visibility\n"
+        "    return float4(1.0, 0.0, 1.0, 1.0);\n"
         "    float4 texColor = blockAtlas.sample(atlasSampler, in.uv0);\n"
         "    if (texColor.a < frame.alphaThreshold) { discard_fragment(); }\n"
         "    float4 light = lightmap.sample(lightmapSampler, in.uv2);\n"

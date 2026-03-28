@@ -108,7 +108,15 @@ public class MetalTerrainRenderer {
             // In official mappings this is "renderChunksInFrustum" but may be obfuscated at runtime.
             // Try multiple possible field names.
             Class<?> wrClass = WorldRenderer.class;
-            renderChunksField = findField(wrClass, "renderChunksInFrustum", "field_175009_l");
+            // Forge 36.2.34 uses field_72755_R (ObjectArrayList<LocalRenderInformationContainer>)
+            // which is populated during setupRender and NOT cleared before RenderWorldLastEvent.
+            // The vanilla field_175009_l (renderChunksInFrustum) is a LinkedHashSet that gets
+            // cleared before our event fires.
+            // Try the Forge field first, then fall back to vanilla.
+            renderChunksField = findField(wrClass, "field_72755_R");
+            if (renderChunksField == null) {
+                renderChunksField = findField(wrClass, "renderChunksInFrustum", "field_175009_l");
+            }
             if (renderChunksField == null) {
                 // Try by type: any Collection field (could be List, Set, LinkedHashSet, etc.)
                 for (Field f : wrClass.getDeclaredFields()) {
@@ -346,7 +354,28 @@ public class MetalTerrainRenderer {
         chunksUploaded = 0;
         chunksCached = 0;
 
+        // One-time diagnostic: log what we're iterating over
+        if (frameCount == 15 && metalRT == RT_SOLID) {
+            LOGGER.info("[METAL-DIAG] renderChunks field={}, type={}, size={}",
+                renderChunksField.getName(), renderChunks.getClass().getName(), renderChunks.size());
+            // Dump ALL collection fields on WorldRenderer to find the right one
+            WorldRenderer wr2 = Minecraft.getInstance().levelRenderer;
+            for (Field f : wr2.getClass().getDeclaredFields()) {
+                try {
+                    f.setAccessible(true);
+                    Object val = f.get(wr2);
+                    if (val instanceof Collection) {
+                        Collection<?> c = (Collection<?>) val;
+                        String elemType = c.isEmpty() ? "?" : c.iterator().next().getClass().getSimpleName();
+                        LOGGER.info("[METAL-DIAG] WR field '{}' type={} size={} elemType={}",
+                            f.getName(), c.getClass().getSimpleName(), c.size(), elemType);
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+
         int chunkIndex = 0;
+        int diagSkipEmpty = 0, diagSkipVbo = 0, diagSkipId = 0, diagSkipData = 0;
         for (Object chunkInfo : renderChunks) {
             // Get the ChunkRender from ChunkInfo
             ChunkRenderDispatcher.ChunkRender chunk;
@@ -375,15 +404,15 @@ public class MetalTerrainRenderer {
             }
 
             // Check if this chunk has data for this render type
-            if (chunk.getCompiledChunk().isEmpty(renderType)) continue;
+            if (chunk.getCompiledChunk().isEmpty(renderType)) { diagSkipEmpty++; continue; }
 
             // Get the VertexBuffer for this render type
             VertexBuffer vbo = chunk.getBuffer(renderType);
-            if (vbo == null) continue;
+            if (vbo == null) { diagSkipVbo++; continue; }
 
             int vboId = vboIdField.getInt(vbo);
             int vertexCount = vboVertexCountField.getInt(vbo);
-            if (vboId <= 0 || vertexCount <= 0) continue;
+            if (vboId <= 0 || vertexCount <= 0) { diagSkipId++; continue; }
 
             // Get chunk offset (camera-relative)
             BlockPos origin = chunk.getOrigin();
@@ -393,12 +422,18 @@ public class MetalTerrainRenderer {
 
             // Get vertex data from cache or read from GL
             ByteBuffer vertexData = getVertexData(vboId, vertexCount);
-            if (vertexData == null) continue;
+            if (vertexData == null) { diagSkipData++; continue; }
 
             // Upload to Metal
             MetalBridge.terrainSetChunk(metalRT, chunkIndex, vertexData, vertexCount,
                                         offsetX, offsetY, offsetZ);
             chunkIndex++;
+        }
+
+        // One-time diagnostic: why were chunks skipped?
+        if (frameCount == 15 && metalRT == RT_SOLID) {
+            LOGGER.info("[METAL-DIAG] RT_SOLID: uploaded={}, skipEmpty={}, skipVbo={}, skipId={}, skipData={}",
+                chunkIndex, diagSkipEmpty, diagSkipVbo, diagSkipId, diagSkipData);
         }
 
         // Render this type

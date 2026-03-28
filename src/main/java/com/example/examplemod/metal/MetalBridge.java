@@ -189,4 +189,23 @@ public class MetalBridge {
 
     /** Get GPU execution time for the last frame in nanoseconds. */
     public static native long getGPUTimeNanos();
+
+    // --- IOSurface sharing (for GL compositing) ---
+
+    /** Get the IOSurface ID for the shared Metal render target. */
+    public static native int getIOSurfaceID();
+
+    /** Get the width of the shared IOSurface. */
+    public static native int getIOSurfaceWidth();
+
+    /** Get the height of the shared IOSurface. */
+    public static native int getIOSurfaceHeight();
+
+    /**
+     * Bind the shared IOSurface to a GL texture via CGLTexImageIOSurface2D.
+     * Must be called from the GL render thread.
+     * @param glTexId the GL texture name (from glGenTextures)
+     * @return true if binding succeeded
+     */
+    public static native boolean bindIOSurfaceToGLTexture(int glTexId);
 }

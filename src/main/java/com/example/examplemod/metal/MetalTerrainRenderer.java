@@ -15,7 +15,9 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL13;
 import org.lwjgl.opengl.GL15;
+import org.lwjgl.opengl.GL31;
 
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
@@ -84,6 +86,11 @@ public class MetalTerrainRenderer {
 
     // Frame counter for texture refresh
     private int frameCount = 0;
+
+    // GL texture for IOSurface compositing
+    private int glIOSurfaceTexId = -1;
+    // GL_TEXTURE_RECTANGLE constant (0x84F5) - not in all LWJGL versions
+    private static final int GL_TEXTURE_RECTANGLE = 0x84F5;
 
     private static class CachedVBOData {
         ByteBuffer data;      // direct ByteBuffer with vertex data
@@ -370,6 +377,82 @@ public class MetalTerrainRenderer {
             // Without this, t_frameActive stays true and all future frames are skipped.
             if (frameStarted) {
                 MetalBridge.terrainEndFrame();
+                // Blit the Metal-rendered IOSurface to GL as a fullscreen quad.
+                // This composites Metal terrain on top of GL content within the
+                // same GL context, bypassing all CAMetalLayer compositing issues.
+                blitIOSurfaceToGL();
+            }
+        }
+    }
+
+    /**
+     * Draw the Metal-rendered IOSurface as a fullscreen GL quad.
+     * Uses CGLTexImageIOSurface2D to bind the shared IOSurface as a
+     * GL_TEXTURE_RECTANGLE, then draws it over the current GL framebuffer.
+     */
+    private void blitIOSurfaceToGL() {
+        try {
+            int surfaceId = MetalBridge.getIOSurfaceID();
+            if (surfaceId <= 0) return;
+
+            int w = MetalBridge.getIOSurfaceWidth();
+            int h = MetalBridge.getIOSurfaceHeight();
+            if (w <= 0 || h <= 0) return;
+
+            // Create GL texture on first use
+            if (glIOSurfaceTexId <= 0) {
+                glIOSurfaceTexId = GL11.glGenTextures();
+                LOGGER.info("[METAL-BLIT] Created GL texture {} for IOSurface {}", glIOSurfaceTexId, surfaceId);
+            }
+
+            // Bind the IOSurface to our GL texture (via native JNI call that uses CGLTexImageIOSurface2D)
+            boolean bound = MetalBridge.bindIOSurfaceToGLTexture(glIOSurfaceTexId);
+            if (!bound) {
+                if (frameCount % 300 == 1) {
+                    LOGGER.warn("[METAL-BLIT] Failed to bind IOSurface to GL texture");
+                }
+                return;
+            }
+
+            // Save GL state
+            GL11.glPushAttrib(GL11.GL_ALL_ATTRIB_BITS);
+            GL11.glMatrixMode(GL11.GL_PROJECTION);
+            GL11.glPushMatrix();
+            GL11.glLoadIdentity();
+            GL11.glOrtho(0, 1, 0, 1, -1, 1);
+            GL11.glMatrixMode(GL11.GL_MODELVIEW);
+            GL11.glPushMatrix();
+            GL11.glLoadIdentity();
+
+            // Set up for alpha-blended fullscreen quad
+            GL11.glEnable(GL_TEXTURE_RECTANGLE);
+            GL11.glBindTexture(GL_TEXTURE_RECTANGLE, glIOSurfaceTexId);
+            GL11.glEnable(GL11.GL_BLEND);
+            GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+            GL11.glDisable(GL11.GL_DEPTH_TEST);
+            GL11.glDisable(GL11.GL_LIGHTING);
+            GL11.glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+            // Draw fullscreen quad
+            // GL_TEXTURE_RECTANGLE uses pixel coordinates (0..w, 0..h), not normalized 0..1
+            GL11.glBegin(GL11.GL_QUADS);
+            GL11.glTexCoord2f(0, h);  GL11.glVertex2f(0, 0);  // bottom-left
+            GL11.glTexCoord2f(w, h);  GL11.glVertex2f(1, 0);  // bottom-right
+            GL11.glTexCoord2f(w, 0);  GL11.glVertex2f(1, 1);  // top-right
+            GL11.glTexCoord2f(0, 0);  GL11.glVertex2f(0, 1);  // top-left
+            GL11.glEnd();
+
+            // Restore GL state
+            GL11.glDisable(GL_TEXTURE_RECTANGLE);
+            GL11.glMatrixMode(GL11.GL_PROJECTION);
+            GL11.glPopMatrix();
+            GL11.glMatrixMode(GL11.GL_MODELVIEW);
+            GL11.glPopMatrix();
+            GL11.glPopAttrib();
+
+        } catch (Throwable e) {
+            if (frameCount % 300 == 1) {
+                LOGGER.error("[METAL-BLIT] GL blit error", e);
             }
         }
     }

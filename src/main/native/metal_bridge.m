@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#import <OpenGL/OpenGL.h>
+#import <OpenGL/gl.h>
 #import <jni.h>
 #include "metal_terrain.h"
 
@@ -21,6 +23,15 @@ extern uint64_t metal_renderer_get_gpu_time_nanos(void);
 extern id<MTLDevice> metal_renderer_get_device(void);
 extern id<MTLCommandQueue> metal_renderer_get_queue(void);
 extern void metal_renderer_set_terrain_active(bool active);
+
+// IOSurface accessors from metal_renderer.m
+extern uint32_t metal_renderer_get_iosurface_id(void);
+extern int metal_renderer_get_surface_width(void);
+extern int metal_renderer_get_surface_height(void);
+
+// IOSurface ref for CGLTexImageIOSurface2D
+#import <IOSurface/IOSurface.h>
+extern IOSurfaceRef metal_renderer_get_iosurface(void);
 
 // Terrain system initialized flag
 static bool g_terrainInited = false;
@@ -243,4 +254,63 @@ Java_com_example_examplemod_metal_MetalBridge_getDeviceName(JNIEnv *env, jclass 
 JNIEXPORT jlong JNICALL
 Java_com_example_examplemod_metal_MetalBridge_getGPUTimeNanos(JNIEnv *env, jclass cls) {
     return (jlong)metal_renderer_get_gpu_time_nanos();
+}
+
+// --- IOSurface sharing (for GL compositing) ---
+
+JNIEXPORT jint JNICALL
+Java_com_example_examplemod_metal_MetalBridge_getIOSurfaceID(JNIEnv *env, jclass cls) {
+    return (jint)metal_renderer_get_iosurface_id();
+}
+
+JNIEXPORT jint JNICALL
+Java_com_example_examplemod_metal_MetalBridge_getIOSurfaceWidth(JNIEnv *env, jclass cls) {
+    return (jint)metal_renderer_get_surface_width();
+}
+
+JNIEXPORT jint JNICALL
+Java_com_example_examplemod_metal_MetalBridge_getIOSurfaceHeight(JNIEnv *env, jclass cls) {
+    return (jint)metal_renderer_get_surface_height();
+}
+
+// Bind the IOSurface as a GL texture using CGLTexImageIOSurface2D.
+// This is called from Java after Metal renders terrain to the shared surface.
+// glTexId: the GL texture name to bind the IOSurface to
+// Returns true if successful.
+JNIEXPORT jboolean JNICALL
+Java_com_example_examplemod_metal_MetalBridge_bindIOSurfaceToGLTexture(JNIEnv *env, jclass cls,
+    jint glTexId) {
+    @autoreleasepool {
+        IOSurfaceRef surface = metal_renderer_get_iosurface();
+        if (!surface) return JNI_FALSE;
+
+        int w = metal_renderer_get_surface_width();
+        int h = metal_renderer_get_surface_height();
+
+        // Get the current CGL context
+        CGLContextObj cglCtx = CGLGetCurrentContext();
+        if (!cglCtx) {
+            NSLog(@"[METAL-BRIDGE] No CGL context for IOSurface bind");
+            return JNI_FALSE;
+        }
+
+        // GL_TEXTURE_RECTANGLE = 0x84F5
+        #ifndef GL_TEXTURE_RECTANGLE
+        #define GL_TEXTURE_RECTANGLE 0x84F5
+        #endif
+
+        // Bind the texture
+        glBindTexture(GL_TEXTURE_RECTANGLE, glTexId);
+
+        // Bind IOSurface to GL texture
+        CGLError err = CGLTexImageIOSurface2D(cglCtx, GL_TEXTURE_RECTANGLE,
+            GL_RGBA, w, h, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, surface, 0);
+
+        if (err != kCGLNoError) {
+            NSLog(@"[METAL-BRIDGE] CGLTexImageIOSurface2D failed: %d", err);
+            return JNI_FALSE;
+        }
+
+        return JNI_TRUE;
+    }
 }

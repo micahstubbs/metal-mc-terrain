@@ -45,6 +45,7 @@ for ARCH in arm64 x86_64; do
         -framework QuartzCore \
         -framework Cocoa \
         -framework IOSurface \
+        -framework OpenGL \
         -I"$JAVA_HOME/include" \
         -I"$JAVA_HOME/include/darwin" \
         -arch "$ARCH" \

@@ -2,18 +2,33 @@
 #import <MetalKit/MetalKit.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <Cocoa/Cocoa.h>
+#import <IOSurface/IOSurface.h>
 
 // ============================================================
 // Metal Renderer - manages device, pipelines, and rendering
+//
+// Compositing strategy: IOSurface sharing.
+// CAMetalLayer approaches all fail because _NSOpenGLViewBackingLayer
+// (used by GLFW/LWJGL on macOS) draws OVER any subviews, sublayers,
+// or even child windows. Instead, we render Metal to an offscreen
+// texture backed by an IOSurface, then the Java side binds it as a
+// GL texture and draws a fullscreen quad within the GL context.
 // ============================================================
 
 // Singleton state
 static id<MTLDevice> g_device = nil;
 static id<MTLCommandQueue> g_commandQueue = nil;
+
+// IOSurface-backed shared texture (Metal renders here, GL reads it)
+static IOSurfaceRef g_ioSurface = nil;
+static id<MTLTexture> g_sharedColorTexture = nil;
+static id<MTLTexture> g_sharedDepthTexture = nil;
+static int g_surfaceWidth = 0;
+static int g_surfaceHeight = 0;
+
+// Legacy CAMetalLayer (kept for API compatibility, not used for compositing)
 static CAMetalLayer *g_metalLayer = nil;
 static NSView *g_metalView = nil;
-static NSWindow *g_overlayWindow = nil;
-static NSWindow *g_parentWindow = nil;
 
 // Phase B: triangle pipeline
 static id<MTLRenderPipelineState> g_trianglePipeline = nil;
@@ -30,15 +45,77 @@ static bool g_terrainActive = false;
 // Forward declarations
 static bool metal_renderer_compile_shaders(void);
 static bool metal_renderer_create_triangle_pipeline(void);
+static bool metal_renderer_create_shared_surface(int width, int height);
 
-// Triangle vertex data: position (x,y) + color (r,g,b,a) as floats
-// 6 floats per vertex, 3 vertices
+// Triangle vertex data (kept for debug)
 static const float kTriangleVertices[] = {
-    // x,    y,     r,   g,   b,   a
-     0.0f,  0.3f,  1.0f, 0.2f, 0.2f, 0.7f,  // top - red
-    -0.3f, -0.3f,  0.2f, 1.0f, 0.2f, 0.7f,  // bottom-left - green
-     0.3f, -0.3f,  0.2f, 0.2f, 1.0f, 0.7f,  // bottom-right - blue
+     0.0f,  0.3f,  1.0f, 0.2f, 0.2f, 0.7f,
+    -0.3f, -0.3f,  0.2f, 1.0f, 0.2f, 0.7f,
+     0.3f, -0.3f,  0.2f, 0.2f, 1.0f, 0.7f,
 };
+
+// ============================================================
+// IOSurface creation
+// ============================================================
+
+static bool metal_renderer_create_shared_surface(int width, int height) {
+    if (width <= 0 || height <= 0) return false;
+    if (g_ioSurface && g_surfaceWidth == width && g_surfaceHeight == height) return true;
+
+    // Release old surface
+    if (g_ioSurface) {
+        CFRelease(g_ioSurface);
+        g_ioSurface = nil;
+    }
+    g_sharedColorTexture = nil;
+
+    // Create IOSurface properties
+    NSDictionary *props = @{
+        (id)kIOSurfaceWidth: @(width),
+        (id)kIOSurfaceHeight: @(height),
+        (id)kIOSurfaceBytesPerElement: @(4),
+        (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA'),
+        (id)kIOSurfaceBytesPerRow: @(width * 4),
+    };
+
+    g_ioSurface = IOSurfaceCreate((__bridge CFDictionaryRef)props);
+    if (!g_ioSurface) {
+        NSLog(@"[METAL] Failed to create IOSurface %dx%d", width, height);
+        return false;
+    }
+
+    // Create Metal texture backed by the IOSurface
+    MTLTextureDescriptor *td = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+        width:width height:height mipmapped:NO];
+    td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+    td.storageMode = MTLStorageModeShared;
+
+    g_sharedColorTexture = [g_device newTextureWithDescriptor:td
+                                                   iosurface:g_ioSurface
+                                                       plane:0];
+    if (!g_sharedColorTexture) {
+        NSLog(@"[METAL] Failed to create Metal texture from IOSurface");
+        CFRelease(g_ioSurface);
+        g_ioSurface = nil;
+        return false;
+    }
+
+    // Create depth texture (not shared, Metal-only)
+    MTLTextureDescriptor *depthTd = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
+        width:width height:height mipmapped:NO];
+    depthTd.usage = MTLTextureUsageRenderTarget;
+    depthTd.storageMode = MTLStorageModePrivate;
+    g_sharedDepthTexture = [g_device newTextureWithDescriptor:depthTd];
+
+    g_surfaceWidth = width;
+    g_surfaceHeight = height;
+
+    NSLog(@"[METAL] IOSurface created: %dx%d (id=%u)", width, height,
+          IOSurfaceGetID(g_ioSurface));
+    return true;
+}
 
 // ============================================================
 // Init / Shutdown
@@ -67,62 +144,30 @@ bool metal_renderer_init(long nsWindowPtr) {
             return false;
         }
 
-        // Create a CAMetalLayer
+        // Create initial shared surface at window size
+        NSView *contentView = [window contentView];
+        NSRect bounds = contentView.bounds;
+        CGFloat scale = window.backingScaleFactor;
+        int w = (int)(bounds.size.width * scale);
+        int h = (int)(bounds.size.height * scale);
+
+        if (!metal_renderer_create_shared_surface(w, h)) {
+            NSLog(@"[METAL] Failed to create shared surface");
+            return false;
+        }
+
+        // Keep a reference to the view for size queries
+        g_metalView = contentView;
+
+        // Create a dummy CAMetalLayer for API compatibility
+        // (terrain code calls metal_renderer_get_layer, but we won't use it for display)
         g_metalLayer = [CAMetalLayer layer];
         g_metalLayer.device = g_device;
         g_metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-        g_metalLayer.framebufferOnly = YES;
-        g_metalLayer.opaque = NO; // transparent so GL content shows through
+        g_metalLayer.framebufferOnly = NO;
+        g_metalLayer.drawableSize = CGSizeMake(w, h);
 
-        // GLFWContentView uses _NSOpenGLViewBackingLayer which draws OVER any
-        // subviews/sublayers during its display cycle. Neither subview nor sublayer
-        // approaches can composite above it. Solution: a child NSWindow that
-        // composites at the window compositor level, above the GL window.
-        g_parentWindow = window;
-        NSRect contentRect = [window contentRectForFrameRect:window.frame];
-        CGFloat scale = window.backingScaleFactor;
-
-        g_overlayWindow = [[NSWindow alloc]
-            initWithContentRect:contentRect
-                      styleMask:NSWindowStyleMaskBorderless
-                        backing:NSBackingStoreBuffered
-                          defer:NO];
-        g_overlayWindow.backgroundColor = [NSColor clearColor];
-        g_overlayWindow.opaque = NO;
-        g_overlayWindow.hasShadow = NO;
-        g_overlayWindow.ignoresMouseEvents = YES;
-        g_overlayWindow.level = window.level;
-
-        // Create a layer-hosting view for the Metal layer
-        NSView *overlayContentView = g_overlayWindow.contentView;
-        overlayContentView.wantsLayer = YES;
-        overlayContentView.layerContentsRedrawPolicy = NSViewLayerContentsRedrawNever;
-
-        g_metalView = [[NSView alloc] initWithFrame:overlayContentView.bounds];
-        g_metalView.wantsLayer = YES;
-        g_metalView.layerContentsRedrawPolicy = NSViewLayerContentsRedrawNever;
-        [g_metalView setLayer:g_metalLayer];
-        g_metalView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-        [overlayContentView addSubview:g_metalView];
-
-        // Set layer size
-        g_metalLayer.contentsScale = scale;
-        NSRect viewBounds = overlayContentView.bounds;
-        g_metalLayer.drawableSize = CGSizeMake(viewBounds.size.width * scale,
-                                                viewBounds.size.height * scale);
-
-        // Attach as child window -- moves with parent, always on top
-        [window addChildWindow:g_overlayWindow ordered:NSWindowAbove];
-        [g_overlayWindow orderFront:nil];
-
-        NSLog(@"[METAL] Layer size: %.0fx%.0f (scale %.1f)",
-              viewBounds.size.width * scale, viewBounds.size.height * scale, scale);
-        NSLog(@"[METAL] Overlay window: %.0fx%.0f at %.0f,%.0f",
-              g_overlayWindow.frame.size.width, g_overlayWindow.frame.size.height,
-              g_overlayWindow.frame.origin.x, g_overlayWindow.frame.origin.y);
-        NSLog(@"[METAL] Parent window: %.0fx%.0f at %.0f,%.0f",
-              window.frame.size.width, window.frame.size.height,
-              window.frame.origin.x, window.frame.origin.y);
+        NSLog(@"[METAL] Surface size: %dx%d (scale %.1f)", w, h, scale);
 
         // Compile shaders
         if (!metal_renderer_compile_shaders()) {
@@ -136,24 +181,24 @@ bool metal_renderer_init(long nsWindowPtr) {
             return false;
         }
 
-        NSLog(@"[METAL] Renderer initialized successfully");
+        NSLog(@"[METAL] Renderer initialized successfully (IOSurface mode)");
         return true;
     }
 }
 
 void metal_renderer_shutdown(void) {
     @autoreleasepool {
-        if (g_overlayWindow) {
-            [g_parentWindow removeChildWindow:g_overlayWindow];
-            [g_overlayWindow close];
-            g_overlayWindow = nil;
-        }
-        g_parentWindow = nil;
         g_metalView = nil;
         g_triangleVertexBuffer = nil;
         g_trianglePipeline = nil;
         g_library = nil;
         g_metalLayer = nil;
+        g_sharedColorTexture = nil;
+        g_sharedDepthTexture = nil;
+        if (g_ioSurface) {
+            CFRelease(g_ioSurface);
+            g_ioSurface = nil;
+        }
         g_commandQueue = nil;
         g_device = nil;
         NSLog(@"[METAL] Renderer shut down");
@@ -167,18 +212,6 @@ void metal_renderer_shutdown(void) {
 static bool metal_renderer_compile_shaders(void) {
     NSError *error = nil;
 
-    // Try loading pre-compiled metallib from resources first
-    NSString *libPath = [[NSBundle mainBundle] pathForResource:@"default" ofType:@"metallib"];
-    if (libPath) {
-        g_library = [g_device newLibraryWithFile:libPath error:&error];
-        if (g_library) {
-            NSLog(@"[METAL] Loaded pre-compiled metallib");
-            return true;
-        }
-    }
-
-    // Fall back to compiling MSL source at runtime
-    // The shader source is embedded as a string for portability
     NSString *shaderSource = @
         "#include <metal_stdlib>\n"
         "using namespace metal;\n"
@@ -235,31 +268,21 @@ static bool metal_renderer_create_triangle_pipeline(void) {
         return false;
     }
 
-    // Vertex descriptor: position (2 floats) + color (4 floats) = 24 bytes/vertex
     MTLVertexDescriptor *vertexDesc = [[MTLVertexDescriptor alloc] init];
-
-    // Attribute 0: position (float2, offset 0)
     vertexDesc.attributes[0].format = MTLVertexFormatFloat2;
     vertexDesc.attributes[0].offset = 0;
     vertexDesc.attributes[0].bufferIndex = 0;
-
-    // Attribute 1: color (float4, offset 8)
     vertexDesc.attributes[1].format = MTLVertexFormatFloat4;
     vertexDesc.attributes[1].offset = 8;
     vertexDesc.attributes[1].bufferIndex = 0;
-
-    // Layout: 24 bytes stride
     vertexDesc.layouts[0].stride = 24;
     vertexDesc.layouts[0].stepFunction = MTLVertexStepFunctionPerVertex;
 
-    // Pipeline descriptor
     MTLRenderPipelineDescriptor *pipeDesc = [[MTLRenderPipelineDescriptor alloc] init];
     pipeDesc.vertexFunction = vertexFunc;
     pipeDesc.fragmentFunction = fragmentFunc;
     pipeDesc.vertexDescriptor = vertexDesc;
     pipeDesc.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
-
-    // Enable alpha blending so triangle blends over GL content
     pipeDesc.colorAttachments[0].blendingEnabled = YES;
     pipeDesc.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
     pipeDesc.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
@@ -272,7 +295,6 @@ static bool metal_renderer_create_triangle_pipeline(void) {
         return false;
     }
 
-    // Create vertex buffer
     g_triangleVertexBuffer = [g_device newBufferWithBytes:kTriangleVertices
                                                    length:sizeof(kTriangleVertices)
                                                   options:MTLResourceStorageModeShared];
@@ -282,56 +304,36 @@ static bool metal_renderer_create_triangle_pipeline(void) {
 }
 
 // ============================================================
-// Frame rendering (Phase B: triangle)
+// Frame rendering (Phase B: triangle - not used when terrain active)
 // ============================================================
 
 static float g_frameCounter = 0.0f;
 
 void metal_renderer_render_frame(void) {
     @autoreleasepool {
-        if (!g_metalLayer || !g_trianglePipeline) return;
-        if (g_terrainActive) return; // terrain v0.2 owns the layer
+        if (!g_sharedColorTexture || !g_trianglePipeline) return;
+        if (g_terrainActive) return;
 
-        // Update layer size if window resized
-        NSRect bounds = g_metalView.bounds;
-        CGFloat scale = g_metalView.window.backingScaleFactor;
-        CGSize newSize = CGSizeMake(bounds.size.width * scale, bounds.size.height * scale);
-        if (g_metalLayer.drawableSize.width != newSize.width ||
-            g_metalLayer.drawableSize.height != newSize.height) {
-            g_metalLayer.drawableSize = newSize;
-        }
-
-        id<CAMetalDrawable> drawable = [g_metalLayer nextDrawable];
-        if (!drawable) return;
-
+        // Render triangle to shared texture (for debug)
         MTLRenderPassDescriptor *passDesc = [MTLRenderPassDescriptor renderPassDescriptor];
-        passDesc.colorAttachments[0].texture = drawable.texture;
+        passDesc.colorAttachments[0].texture = g_sharedColorTexture;
         passDesc.colorAttachments[0].loadAction = MTLLoadActionClear;
         passDesc.colorAttachments[0].storeAction = MTLStoreActionStore;
-        passDesc.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0); // transparent
+        passDesc.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
 
         id<MTLCommandBuffer> commandBuffer = [g_commandQueue commandBuffer];
-        commandBuffer.label = @"SkyFactory Metal Frame";
-
         id<MTLRenderCommandEncoder> encoder =
             [commandBuffer renderCommandEncoderWithDescriptor:passDesc];
-        encoder.label = @"Triangle Pass";
 
         [encoder setRenderPipelineState:g_trianglePipeline];
         [encoder setVertexBuffer:g_triangleVertexBuffer offset:0 atIndex:0];
 
-        // Pulsing alpha to show it's alive
         g_frameCounter += 0.02f;
         float alpha = 0.4f + 0.3f * sinf(g_frameCounter);
         [encoder setVertexBytes:&alpha length:sizeof(float) atIndex:1];
 
         [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
         [encoder endEncoding];
-
-        [commandBuffer presentDrawable:drawable];
-
-        // Track GPU time
-        g_lastCommandBuffer = commandBuffer;
 
         [commandBuffer commit];
     }
@@ -350,7 +352,10 @@ uint64_t metal_renderer_get_gpu_time_nanos(void) {
     return g_gpuTimeNanos;
 }
 
-// Accessors for metal_bridge.m to pass device/queue/layer to terrain system
+// ============================================================
+// Accessors
+// ============================================================
+
 id<MTLDevice> metal_renderer_get_device(void) {
     return g_device;
 }
@@ -370,3 +375,35 @@ NSView* metal_renderer_get_view(void) {
 void metal_renderer_set_terrain_active(bool active) {
     g_terrainActive = active;
 }
+
+// ============================================================
+// IOSurface shared texture accessors (for terrain rendering)
+// ============================================================
+
+id<MTLTexture> metal_renderer_get_shared_color_texture(void) {
+    return g_sharedColorTexture;
+}
+
+id<MTLTexture> metal_renderer_get_shared_depth_texture(void) {
+    return g_sharedDepthTexture;
+}
+
+// Returns the IOSurface ID for GL binding. Returns 0 if not available.
+uint32_t metal_renderer_get_iosurface_id(void) {
+    if (!g_ioSurface) return 0;
+    return IOSurfaceGetID(g_ioSurface);
+}
+
+// Returns the IOSurfaceRef for direct GL binding via CGLTexImageIOSurface2D
+IOSurfaceRef metal_renderer_get_iosurface(void) {
+    return g_ioSurface;
+}
+
+// Ensure the shared surface matches the requested size.
+// Called by terrain begin_frame to resize if window changed.
+bool metal_renderer_ensure_surface(int width, int height) {
+    return metal_renderer_create_shared_surface(width, height);
+}
+
+int metal_renderer_get_surface_width(void) { return g_surfaceWidth; }
+int metal_renderer_get_surface_height(void) { return g_surfaceHeight; }

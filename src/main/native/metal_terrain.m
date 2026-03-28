@@ -11,6 +11,13 @@
 #import <simd/simd.h>
 #include "metal_terrain.h"
 
+// Forward declarations from metal_renderer.m
+extern bool metal_renderer_ensure_surface(int width, int height);
+extern id<MTLTexture> metal_renderer_get_shared_color_texture(void);
+extern id<MTLTexture> metal_renderer_get_shared_depth_texture(void);
+extern CAMetalLayer* metal_renderer_get_layer(void);
+extern NSView* metal_renderer_get_view(void);
+
 // ============================================================
 // State
 // ============================================================
@@ -923,38 +930,16 @@ bool metal_terrain_begin_frame(int width, int height, bool toScreen) {
         id<MTLTexture> colorTarget;
         id<MTLTexture> depthTarget;
 
-        if (toScreen) {
-            CAMetalLayer *layer = metal_renderer_get_layer();
-            if (!layer) {
-                NSLog(@"[METAL-TERRAIN] begin_frame: no CAMetalLayer");
-                return false;
-            }
-
-            // Update layer size to match requested resolution
-            NSView *view = metal_renderer_get_view();
-            if (view) {
-                CGFloat scale = view.window.backingScaleFactor;
-                layer.contentsScale = scale;
-                layer.drawableSize = CGSizeMake(width, height);
-            }
-
-            t_frameDrawable = [layer nextDrawable];
-            if (!t_frameDrawable) {
-                NSLog(@"[METAL-TERRAIN] begin_frame: no drawable");
-                return false;
-            }
-
-            colorTarget = t_frameDrawable.texture;
-
-            // Ensure depth target matches drawable size
-            terrain_ensure_render_targets(width, height);
-            depthTarget = t_depthTarget;
-        } else {
-            // Offscreen mode (v0.1)
-            terrain_ensure_render_targets(width, height);
-            colorTarget = t_colorTarget;
-            depthTarget = t_depthTarget;
+        // Always render to the shared IOSurface texture.
+        // The Java side will blit this to GL as a fullscreen quad.
+        metal_renderer_ensure_surface(width, height);
+        colorTarget = metal_renderer_get_shared_color_texture();
+        depthTarget = metal_renderer_get_shared_depth_texture();
+        if (!colorTarget || !depthTarget) {
+            NSLog(@"[METAL-TERRAIN] begin_frame: no shared surface");
+            return false;
         }
+        t_frameDrawable = nil;  // no drawable needed
 
         // Create command buffer
         t_frameCmdBuf = [t_queue commandBuffer];

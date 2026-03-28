@@ -315,16 +315,33 @@ public class MetalTerrainRenderer {
             double camY = cameraPos.y;
             double camZ = cameraPos.z;
 
-            // Get projection from GL state (correct, not reset at RenderWorldLastEvent)
+            // Get projection from GL state
             java.nio.FloatBuffer glProjBuf = BufferUtils.createFloatBuffer(16);
             GL11.glGetFloatv(GL11.GL_PROJECTION_MATRIX, glProjBuf);
             float[] projArr = new float[16];
             glProjBuf.get(projArr);
 
-            // Get view (rotation) from MatrixStack (GL modelview is identity at this point)
-            MatrixStack matrixStack = event.getMatrixStack();
-            Matrix4f viewMatrix = matrixStack.last().pose();
-            float[] viewArr = matrix4fToArray(viewMatrix);
+            // Build view matrix from camera quaternion directly.
+            // This avoids all Matrix4f reflection/store/transpose issues.
+            ActiveRenderInfo activeCamera = mc.gameRenderer.getMainCamera();
+            net.minecraft.util.math.vector.Quaternion rot = activeCamera.rotation();
+            float qi = rot.i(), qj = rot.j(), qk = rot.k(), qr = rot.r();
+
+            // Quaternion to column-major 4x4 rotation matrix
+            float[] viewArr = new float[16];
+            viewArr[0]  = 1 - 2*(qj*qj + qk*qk);
+            viewArr[1]  = 2*(qi*qj + qk*qr);
+            viewArr[2]  = 2*(qi*qk - qj*qr);
+            viewArr[3]  = 0;
+            viewArr[4]  = 2*(qi*qj - qk*qr);
+            viewArr[5]  = 1 - 2*(qi*qi + qk*qk);
+            viewArr[6]  = 2*(qj*qk + qi*qr);
+            viewArr[7]  = 0;
+            viewArr[8]  = 2*(qi*qk + qj*qr);
+            viewArr[9]  = 2*(qj*qk - qi*qr);
+            viewArr[10] = 1 - 2*(qi*qi + qj*qj);
+            viewArr[11] = 0;
+            viewArr[12] = 0; viewArr[13] = 0; viewArr[14] = 0; viewArr[15] = 1;
 
             // Multiply: proj * view
             float[] viewProjArr = multiplyMatrices(projArr, viewArr);
@@ -587,7 +604,11 @@ public class MetalTerrainRenderer {
             int vboId = vboIdField.getInt(vbo);
             int vertexCount = vboVertexCountField.getInt(vbo);
             if (frameCount == 15 && metalRT == RT_SOLID && chunkIndex == 0) {
-                LOGGER.info("[METAL-DIAG] First chunk: vboId={}, vertexCount={}", vboId, vertexCount);
+                BlockPos diagOrigin = chunk.getOrigin();
+                LOGGER.info("[METAL-DIAG] First chunk: vboId={}, vertexCount={}, chunkOrigin=({},{},{}), camRelative=({},{},{})",
+                    vboId, vertexCount,
+                    diagOrigin.getX(), diagOrigin.getY(), diagOrigin.getZ(),
+                    (float)(diagOrigin.getX() - camX), (float)(diagOrigin.getY() - camY), (float)(diagOrigin.getZ() - camZ));
                 // Dump ALL fields on this VBO for debugging
                 for (Field df : vbo.getClass().getDeclaredFields()) {
                     try {
@@ -609,6 +630,18 @@ public class MetalTerrainRenderer {
             // Get vertex data from cache or read from GL
             ByteBuffer vertexData = getVertexData(vboId, vertexCount);
             if (vertexData == null) { diagSkipData++; continue; }
+
+            // Log first vertex position to verify VBO data
+            if (frameCount == 15 && metalRT == RT_SOLID && chunkIndex == 0 && vertexData.remaining() >= 12) {
+                int savedPos = vertexData.position();
+                float vx = vertexData.getFloat(0);
+                float vy = vertexData.getFloat(4);
+                float vz = vertexData.getFloat(8);
+                LOGGER.info("[METAL-DIAG] First vertex raw position: ({},{},{})", vx, vy, vz);
+                LOGGER.info("[METAL-DIAG] First vertex world-relative: ({},{},{})",
+                    vx + offsetX, vy + offsetY, vz + offsetZ);
+                vertexData.position(savedPos);
+            }
 
             // Upload to Metal
             MetalBridge.terrainSetChunk(metalRT, chunkIndex, vertexData, vertexCount,
@@ -784,16 +817,11 @@ public class MetalTerrainRenderer {
                     }
                 }
                 if (floatFields.size() == 16) {
-                    // Fields are in row-major order (a_=m00, b_=m01, c_=m02, d_=m03, e_=m10, ...)
-                    // Metal/GL expect column-major. Always transpose.
-                    float[] rowMajor = new float[16];
+                    // TEST: try reading directly WITHOUT transpose
+                    // If terrain renders correctly, fields are already column-major
+                    // Read fields directly - test without transpose
                     for (int i = 0; i < 16; i++) {
-                        rowMajor[i] = floatFields.get(i).getFloat(mat);
-                    }
-                    for (int row = 0; row < 4; row++) {
-                        for (int col = 0; col < 4; col++) {
-                            arr[col * 4 + row] = rowMajor[row * 4 + col];
-                        }
+                        arr[i] = floatFields.get(i).getFloat(mat);
                     }
                     if (frameCount == 16) {
                         LOGGER.info("[METAL-DIAG] Matrix via reflection ({} float fields)", floatFields.size());

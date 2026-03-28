@@ -331,16 +331,16 @@ public class MetalTerrainRenderer {
 
             // One-time diagnostic: log the matrices
             if (frameCount == 16) {
-                LOGGER.info("[METAL-DIAG] view matrix: [{},{},{},{}] [{},{},{},{}]...",
-                    viewArr[0], viewArr[1], viewArr[2], viewArr[3],
-                    viewArr[4], viewArr[5], viewArr[6], viewArr[7]);
-                LOGGER.info("[METAL-DIAG] proj matrix: [{},{},{},{}] [{},{},{},{}]...",
-                    projArr[0], projArr[1], projArr[2], projArr[3],
-                    projArr[4], projArr[5], projArr[6], projArr[7]);
-                LOGGER.info("[METAL-DIAG] viewProj: [{},{},{},{}] [{},{},{},{}]...",
-                    viewProjArr[0], viewProjArr[1], viewProjArr[2], viewProjArr[3],
-                    viewProjArr[4], viewProjArr[5], viewProjArr[6], viewProjArr[7]);
+                LOGGER.info("[METAL-DIAG] view[0-3]: {},{},{},{}", viewArr[0], viewArr[1], viewArr[2], viewArr[3]);
+                LOGGER.info("[METAL-DIAG] view[4-7]: {},{},{},{}", viewArr[4], viewArr[5], viewArr[6], viewArr[7]);
+                LOGGER.info("[METAL-DIAG] view[8-15]: {},{},{},{} / {},{},{},{}", viewArr[8], viewArr[9], viewArr[10], viewArr[11], viewArr[12], viewArr[13], viewArr[14], viewArr[15]);
+                LOGGER.info("[METAL-DIAG] proj[0-3]: {},{},{},{}", projArr[0], projArr[1], projArr[2], projArr[3]);
+                LOGGER.info("[METAL-DIAG] proj[4-7]: {},{},{},{}", projArr[4], projArr[5], projArr[6], projArr[7]);
+                LOGGER.info("[METAL-DIAG] proj[8-15]: {},{},{},{} / {},{},{},{}", projArr[8], projArr[9], projArr[10], projArr[11], projArr[12], projArr[13], projArr[14], projArr[15]);
+                LOGGER.info("[METAL-DIAG] viewProj[0-7]: {},{},{},{} / {},{},{},{}", viewProjArr[0], viewProjArr[1], viewProjArr[2], viewProjArr[3], viewProjArr[4], viewProjArr[5], viewProjArr[6], viewProjArr[7]);
+                LOGGER.info("[METAL-DIAG] viewProj[8-15]: {},{},{},{} / {},{},{},{}", viewProjArr[8], viewProjArr[9], viewProjArr[10], viewProjArr[11], viewProjArr[12], viewProjArr[13], viewProjArr[14], viewProjArr[15]);
                 LOGGER.info("[METAL-DIAG] camera pos: {},{},{}", camX, camY, camZ);
+                // Also log first chunk offset and first vertex position
             }
 
             // Fog parameters (approximate)
@@ -759,10 +759,19 @@ public class MetalTerrainRenderer {
         float[] arr = new float[16];
         try {
             // Use FloatBuffer to extract matrix values - avoids SRG field name issues
+            // Matrix4f.store writes in row-major order: m00,m01,m02,m03,m10,...
+            // Metal/GL expect column-major: m00,m10,m20,m30,m01,...
             java.nio.FloatBuffer buf = java.nio.FloatBuffer.allocate(16);
             mat.store(buf);
             buf.flip();
-            buf.get(arr);
+            float[] rowMajor = new float[16];
+            buf.get(rowMajor);
+            // Transpose to column-major
+            for (int row = 0; row < 4; row++) {
+                for (int col = 0; col < 4; col++) {
+                    arr[col * 4 + row] = rowMajor[row * 4 + col];
+                }
+            }
         } catch (Exception e) {
             // Fallback: try reflection with all possible field name patterns
             try {
@@ -775,18 +784,40 @@ public class MetalTerrainRenderer {
                     }
                 }
                 if (floatFields.size() == 16) {
-                    // Matrix4f stores in row-major: m00,m01,m02,m03,m10,...
-                    // Metal expects column-major: m00,m10,m20,m30,m01,...
-                    // Read row-major, then transpose
-                    float[] rowMajor = new float[16];
-                    for (int i = 0; i < 16; i++) {
-                        rowMajor[i] = floatFields.get(i).getFloat(mat);
+                    // Log field names to determine order
+                    if (frameCount == 16) {
+                        StringBuilder sb = new StringBuilder("[METAL-DIAG] Matrix4f fields: ");
+                        for (Field ff : floatFields) sb.append(ff.getName()).append(" ");
+                        LOGGER.info(sb.toString());
                     }
-                    // Transpose: arr[col*4+row] = rowMajor[row*4+col]
-                    for (int row = 0; row < 4; row++) {
-                        for (int col = 0; col < 4; col++) {
-                            arr[col * 4 + row] = rowMajor[row * 4 + col];
+                    // Read fields and determine layout from names
+                    // Mojang names: m00,m01,m02,m03,m10,... (row-major)
+                    // SRG names may differ
+                    for (int i = 0; i < 16; i++) {
+                        arr[i] = floatFields.get(i).getFloat(mat);
+                    }
+                    // Check if this looks like row-major by examining the 4th field
+                    // In row-major, field[3] = m03 (usually 0 for rotation matrices)
+                    // In column-major, field[3] = m30 (also usually 0 for rotation)
+                    // Better test: field[12-15] should be translation in column-major
+                    // For the view matrix: col-major[12-14] = translation
+                    //                     row-major[3,7,11] = translation
+                    // Since view has no translation (it's rotation only), use proj:
+                    // proj col-major: [10] = -(f+n)/(f-n), [14] = -2fn/(f-n)
+                    // proj row-major: [10] = -(f+n)/(f-n), [11] = -2fn/(f-n)
+                    // If field[14] is near-zero and field[11] is non-zero, it's row-major -> transpose
+                    if (Math.abs(arr[14]) < 0.001f && Math.abs(arr[11]) > 0.001f) {
+                        // Row-major detected, transpose to column-major
+                        float[] transposed = new float[16];
+                        for (int row = 0; row < 4; row++) {
+                            for (int col = 0; col < 4; col++) {
+                                transposed[col * 4 + row] = arr[row * 4 + col];
+                            }
                         }
+                        System.arraycopy(transposed, 0, arr, 0, 16);
+                        if (frameCount == 16) LOGGER.info("[METAL-DIAG] Detected row-major, transposed");
+                    } else {
+                        if (frameCount == 16) LOGGER.info("[METAL-DIAG] Using fields as-is (column-major)");
                     }
                     if (frameCount == 16) {
                         LOGGER.info("[METAL-DIAG] Matrix via reflection ({} float fields)", floatFields.size());

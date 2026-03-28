@@ -350,7 +350,23 @@ public class MetalTerrainRenderer {
             } else if (chunkInfo instanceof ChunkRenderDispatcher.ChunkRender) {
                 chunk = (ChunkRenderDispatcher.ChunkRender) chunkInfo;
             } else {
-                continue;
+                // Lazy resolve: collection was empty at init time, so we couldn't
+                // determine the wrapper type. Now we have a real element -- find
+                // the ChunkRender field inside it.
+                for (Field cf : chunkInfo.getClass().getDeclaredFields()) {
+                    if (ChunkRenderDispatcher.ChunkRender.class.isAssignableFrom(cf.getType())) {
+                        cf.setAccessible(true);
+                        chunkInfoChunkField = cf;
+                        LOGGER.info("[METAL-TERRAIN] Lazy-resolved chunkInfo.chunk: {}", cf.getName());
+                        break;
+                    }
+                }
+                if (chunkInfoChunkField != null) {
+                    chunk = (ChunkRenderDispatcher.ChunkRender) chunkInfoChunkField.get(chunkInfo);
+                } else {
+                    LOGGER.warn("[METAL-TERRAIN] Cannot find ChunkRender field in {}", chunkInfo.getClass().getName());
+                    continue;
+                }
             }
 
             // Check if this chunk has data for this render type

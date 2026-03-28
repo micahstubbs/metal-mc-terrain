@@ -99,7 +99,7 @@ for rel in \
   "org/apache/httpcomponents/httpclient/4.3.3/httpclient-4.3.3.jar" \
   "commons-logging/commons-logging/1.1.3/commons-logging-1.1.3.jar" \
   "org/apache/httpcomponents/httpcore/4.3.2/httpcore-4.3.2.jar" \
-  "it/unimi/dsi/fastutil/8.5.15/fastutil-8.5.15.jar" \
+  "it/unimi/dsi/fastutil/8.2.1/fastutil-8.2.1.jar" \
   "com/mojang/text2speech/1.11.3/text2speech-1.11.3.jar" \
   "ca/weblite/java-objc-bridge/1.0.0/java-objc-bridge-1.0.0.jar" \
 ; do

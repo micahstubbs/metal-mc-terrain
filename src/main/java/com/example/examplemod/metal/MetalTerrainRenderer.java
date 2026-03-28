@@ -639,7 +639,13 @@ public class MetalTerrainRenderer {
                 GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, vboId);
                 int glBufSize = GL15.glGetBufferParameteri(GL15.GL_ARRAY_BUFFER, GL15.GL_BUFFER_SIZE);
                 GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-                LOGGER.info("[METAL-DIAG] GL buffer size: {} bytes (expected {})", glBufSize, dataSize);
+                boolean isBuffer = GL15.glIsBuffer(vboId);
+                LOGGER.info("[METAL-DIAG] GL buffer size: {} bytes (expected {}), isBuffer={}", glBufSize, dataSize, isBuffer);
+                // Also try with field_177365_a (vertexCount) as VBO id in case they're swapped
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, vertexCount);
+                int altBufSize = GL15.glGetBufferParameteri(GL15.GL_ARRAY_BUFFER, GL15.GL_BUFFER_SIZE);
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
+                LOGGER.info("[METAL-DIAG] Alt VBO id={}: GL buffer size={}, isBuffer={}", vertexCount, altBufSize, GL15.glIsBuffer(vertexCount));
 
                 // Log first 4 vertex positions (each 32 bytes stride)
                 for (int vi = 0; vi < Math.min(4, vertexCount); vi++) {

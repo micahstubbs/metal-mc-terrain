@@ -314,23 +314,32 @@ public class MetalTerrainRenderer {
             double camY = cameraPos.y;
             double camZ = cameraPos.z;
 
-            // Get view-projection matrix from the event's MatrixStack
+            // Get view matrix from event's MatrixStack
             MatrixStack matrixStack = event.getMatrixStack();
             Matrix4f viewMatrix = matrixStack.last().pose();
-            Matrix4f projMatrix = event.getProjectionMatrix();
 
-            // Combine view * projection
-            Matrix4f viewProj = projMatrix.copy();
-            viewProj.multiply(viewMatrix);
-            float[] viewProjArr = matrix4fToArray(viewProj);
+            // Get projection matrix directly from GameRenderer
+            // event.getProjectionMatrix() returns NaN in RenderWorldLastEvent on Forge 36.2.34
+            Matrix4f projMatrix = mc.gameRenderer.getProjectionMatrix(
+                mc.gameRenderer.getMainCamera(),
+                event.getPartialTicks(), true);
 
-            // One-time diagnostic: log the matrix
+            // Extract and multiply manually (Matrix4f.multiply can produce NaN)
+            float[] viewArr = matrix4fToArray(viewMatrix);
+            float[] projArr = matrix4fToArray(projMatrix);
+            float[] viewProjArr = multiplyMatrices(projArr, viewArr);
+
+            // One-time diagnostic: log the matrices
             if (frameCount == 16) {
-                LOGGER.info("[METAL-DIAG] viewProj matrix: [{},{},{},{}] [{},{},{},{}] [{},{},{},{}] [{},{},{},{}]",
+                LOGGER.info("[METAL-DIAG] view matrix: [{},{},{},{}] [{},{},{},{}]...",
+                    viewArr[0], viewArr[1], viewArr[2], viewArr[3],
+                    viewArr[4], viewArr[5], viewArr[6], viewArr[7]);
+                LOGGER.info("[METAL-DIAG] proj matrix: [{},{},{},{}] [{},{},{},{}]...",
+                    projArr[0], projArr[1], projArr[2], projArr[3],
+                    projArr[4], projArr[5], projArr[6], projArr[7]);
+                LOGGER.info("[METAL-DIAG] viewProj: [{},{},{},{}] [{},{},{},{}]...",
                     viewProjArr[0], viewProjArr[1], viewProjArr[2], viewProjArr[3],
-                    viewProjArr[4], viewProjArr[5], viewProjArr[6], viewProjArr[7],
-                    viewProjArr[8], viewProjArr[9], viewProjArr[10], viewProjArr[11],
-                    viewProjArr[12], viewProjArr[13], viewProjArr[14], viewProjArr[15]);
+                    viewProjArr[4], viewProjArr[5], viewProjArr[6], viewProjArr[7]);
                 LOGGER.info("[METAL-DIAG] camera pos: {},{},{}", camX, camY, camZ);
             }
 
@@ -831,6 +840,23 @@ public class MetalTerrainRenderer {
     public int getRTVertexCount(int rt) { return rt >= 0 && rt < 4 ? rtVertexCount[rt] : 0; }
     /** Render type name. */
     public static String getRTName(int rt) { return rt >= 0 && rt < 4 ? RT_NAMES[rt] : "?"; }
+
+    /**
+     * Multiply two 4x4 column-major matrices: result = a * b
+     */
+    private float[] multiplyMatrices(float[] a, float[] b) {
+        float[] r = new float[16];
+        for (int col = 0; col < 4; col++) {
+            for (int row = 0; row < 4; row++) {
+                float sum = 0;
+                for (int k = 0; k < 4; k++) {
+                    sum += a[k * 4 + row] * b[col * 4 + k];
+                }
+                r[col * 4 + row] = sum;
+            }
+        }
+        return r;
+    }
 
     /** Clear the VBO cache (call on world unload). */
     public void clearCache() {

@@ -324,6 +324,16 @@ public class MetalTerrainRenderer {
             viewProj.multiply(viewMatrix);
             float[] viewProjArr = matrix4fToArray(viewProj);
 
+            // One-time diagnostic: log the matrix
+            if (frameCount == 16) {
+                LOGGER.info("[METAL-DIAG] viewProj matrix: [{},{},{},{}] [{},{},{},{}] [{},{},{},{}] [{},{},{},{}]",
+                    viewProjArr[0], viewProjArr[1], viewProjArr[2], viewProjArr[3],
+                    viewProjArr[4], viewProjArr[5], viewProjArr[6], viewProjArr[7],
+                    viewProjArr[8], viewProjArr[9], viewProjArr[10], viewProjArr[11],
+                    viewProjArr[12], viewProjArr[13], viewProjArr[14], viewProjArr[15]);
+                LOGGER.info("[METAL-DIAG] camera pos: {},{},{}", camX, camY, camZ);
+            }
+
             // Fog parameters (approximate)
             float fogStart = Math.max(0, mc.options.renderDistance * 16 - 32);
             float fogEnd = mc.options.renderDistance * 16;
@@ -374,13 +384,14 @@ public class MetalTerrainRenderer {
             }
         } finally {
             // Always end the frame if it was started, even if an exception occurred.
-            // Without this, t_frameActive stays true and all future frames are skipped.
             if (frameStarted) {
                 MetalBridge.terrainEndFrame();
-                // Blit the Metal-rendered IOSurface to GL as a fullscreen quad.
-                // This composites Metal terrain on top of GL content within the
-                // same GL context, bypassing all CAMetalLayer compositing issues.
                 blitIOSurfaceToGL();
+
+                // Automated screenshot for autonomous verification (once, at frame 20)
+                if (frameCount == 20) {
+                    saveAutomatedScreenshot();
+                }
             }
         }
     }
@@ -737,31 +748,48 @@ public class MetalTerrainRenderer {
      */
     private float[] matrix4fToArray(Matrix4f mat) {
         float[] arr = new float[16];
-        // Matrix4f stores values in m[row][col] order
-        // Metal expects column-major, so we need:
-        // arr[col*4+row] = mat.m[row][col]
-        // But Minecraft's Matrix4f is already column-major in its internal buffer
-        // We need to use the store method or access the fields directly
         try {
-            // Try using reflection to access the float fields
-            // Matrix4f in Minecraft 1.16.5 has m00, m01, m02, m03, m10, ... fields
-            Field m00 = Matrix4f.class.getDeclaredField("m00");
-            m00.setAccessible(true);
-            // The fields are stored as m[row][col] but we need column-major output
-            String[] fieldNames = {
-                "m00", "m10", "m20", "m30",  // column 0
-                "m01", "m11", "m21", "m31",  // column 1
-                "m02", "m12", "m22", "m32",  // column 2
-                "m03", "m13", "m23", "m33"   // column 3
-            };
-            for (int i = 0; i < 16; i++) {
-                Field f = Matrix4f.class.getDeclaredField(fieldNames[i]);
-                f.setAccessible(true);
-                arr[i] = f.getFloat(mat);
-            }
+            // Use FloatBuffer to extract matrix values - avoids SRG field name issues
+            java.nio.FloatBuffer buf = java.nio.FloatBuffer.allocate(16);
+            mat.store(buf);
+            buf.flip();
+            buf.get(arr);
         } catch (Exception e) {
-            // Fallback: identity matrix
-            arr[0] = arr[5] = arr[10] = arr[15] = 1.0f;
+            // Fallback: try reflection with all possible field name patterns
+            try {
+                // Find all float fields on Matrix4f (there should be exactly 16)
+                java.util.List<Field> floatFields = new java.util.ArrayList<>();
+                for (Field f : Matrix4f.class.getDeclaredFields()) {
+                    if (f.getType() == float.class) {
+                        f.setAccessible(true);
+                        floatFields.add(f);
+                    }
+                }
+                if (floatFields.size() == 16) {
+                    // Matrix4f stores in row-major: m00,m01,m02,m03,m10,...
+                    // Metal expects column-major: m00,m10,m20,m30,m01,...
+                    // Read row-major, then transpose
+                    float[] rowMajor = new float[16];
+                    for (int i = 0; i < 16; i++) {
+                        rowMajor[i] = floatFields.get(i).getFloat(mat);
+                    }
+                    // Transpose: arr[col*4+row] = rowMajor[row*4+col]
+                    for (int row = 0; row < 4; row++) {
+                        for (int col = 0; col < 4; col++) {
+                            arr[col * 4 + row] = rowMajor[row * 4 + col];
+                        }
+                    }
+                    if (frameCount == 16) {
+                        LOGGER.info("[METAL-DIAG] Matrix via reflection ({} float fields)", floatFields.size());
+                    }
+                } else {
+                    LOGGER.warn("[METAL-DIAG] Matrix4f has {} float fields, expected 16", floatFields.size());
+                    arr[0] = arr[5] = arr[10] = arr[15] = 1.0f;
+                }
+            } catch (Exception e2) {
+                LOGGER.error("[METAL-DIAG] Matrix extraction failed", e2);
+                arr[0] = arr[5] = arr[10] = arr[15] = 1.0f;
+            }
         }
         return arr;
     }
@@ -809,5 +837,25 @@ public class MetalTerrainRenderer {
         vboCache.clear();
         texturesImported = false;
         lastAtlasTexId = -1;
+    }
+
+    /**
+     * Capture the current GL framebuffer to a PNG file for autonomous verification.
+     * Saves to the game directory as metal-debug-screenshot.png.
+     */
+    private void saveAutomatedScreenshot() {
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            int w = mc.getWindow().getWidth();
+            int h = mc.getWindow().getHeight();
+            // Use Minecraft's built-in screenshot utility
+            net.minecraft.util.ScreenShotHelper.grab(
+                mc.gameDirectory, w, h,
+                mc.getMainRenderTarget(),
+                (msg) -> LOGGER.info("[METAL-DEBUG] Screenshot: {}", msg.getString())
+            );
+        } catch (Exception e) {
+            LOGGER.error("[METAL-DEBUG] Screenshot failed", e);
+        }
     }
 }

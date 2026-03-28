@@ -72,39 +72,36 @@ bool metal_renderer_init(long nsWindowPtr) {
         g_metalLayer.framebufferOnly = YES;
         g_metalLayer.opaque = NO; // transparent so GL content shows through
 
-        // Get the content view's bounds
+        // Get the content view and ensure it's layer-backed
         NSView *contentView = [window contentView];
         NSRect bounds = contentView.bounds;
-
-        // Create a child NSView for the Metal layer, overlaid on the GL view
-        g_metalView = [[NSView alloc] initWithFrame:bounds];
-        g_metalView.wantsLayer = YES;
-        g_metalView.layer = g_metalLayer;
-        g_metalView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-
-        // Add as subview ON TOP of the GL view
-        [contentView addSubview:g_metalView positioned:NSWindowAbove relativeTo:nil];
+        contentView.wantsLayer = YES;
 
         // Set layer size
         CGFloat scale = window.backingScaleFactor;
         g_metalLayer.contentsScale = scale;
         g_metalLayer.drawableSize = CGSizeMake(bounds.size.width * scale,
                                                 bounds.size.height * scale);
+        g_metalLayer.frame = contentView.layer.bounds;
 
-        // Ensure Metal layer is above GL layer in compositing order.
-        // LWJGL 3.3.1 arm64 may use a layer-backed GL view, so subview order alone
-        // is not sufficient -- we need explicit zPosition.
+        // Add Metal layer as a SUBLAYER of the content view's layer.
+        // This ensures it composites above the GL content, which on modern macOS
+        // (layer-backed views, LWJGL 3.3.1 arm64) also renders to a sublayer.
+        // Using a sibling NSView with zPosition doesn't work because GL renders
+        // to the view's own backing layer, which is in a different layer tree.
+        [contentView.layer addSublayer:g_metalLayer];
         g_metalLayer.zPosition = 1000;
 
-        // Debug: log view hierarchy to verify positioning
+        // Also keep a reference NSView for bounds tracking (not used for layer hosting)
+        g_metalView = contentView;
+
         NSLog(@"[METAL] Layer size: %.0fx%.0f (scale %.1f)",
               bounds.size.width * scale, bounds.size.height * scale, scale);
-        NSLog(@"[METAL] contentView subviews: %lu, metalView superview: %@",
-              (unsigned long)contentView.subviews.count,
-              g_metalView.superview ? @"yes" : @"no");
-        NSLog(@"[METAL] metalView frame: %.0f,%.0f %.0fx%.0f",
-              g_metalView.frame.origin.x, g_metalView.frame.origin.y,
-              g_metalView.frame.size.width, g_metalView.frame.size.height);
+        NSLog(@"[METAL] contentView.layer sublayers: %lu",
+              (unsigned long)contentView.layer.sublayers.count);
+        NSLog(@"[METAL] metalLayer frame: %.0f,%.0f %.0fx%.0f",
+              g_metalLayer.frame.origin.x, g_metalLayer.frame.origin.y,
+              g_metalLayer.frame.size.width, g_metalLayer.frame.size.height);
         NSLog(@"[METAL] metalLayer zPosition: %.0f", g_metalLayer.zPosition);
 
         // Compile shaders
@@ -126,10 +123,10 @@ bool metal_renderer_init(long nsWindowPtr) {
 
 void metal_renderer_shutdown(void) {
     @autoreleasepool {
-        if (g_metalView) {
-            [g_metalView removeFromSuperview];
-            g_metalView = nil;
+        if (g_metalLayer) {
+            [g_metalLayer removeFromSuperlayer];
         }
+        g_metalView = nil;
         g_triangleVertexBuffer = nil;
         g_trianglePipeline = nil;
         g_library = nil;

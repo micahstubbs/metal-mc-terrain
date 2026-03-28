@@ -306,6 +306,12 @@ public class MetalTerrainRenderer {
                 rtCpuNanos[i] = System.nanoTime() - rtStart;
             }
 
+            // Diagnostic: log chunk counts once after first few frames
+            if (frameCount == 10) {
+                LOGGER.info("[METAL-TERRAIN] Frame {} stats: uploaded={}, cached={}, draws={}, verts={}",
+                    frameCount, chunksUploaded, chunksCached, lastMetalDrawCount, lastMetalVertexCount);
+            }
+
             MetalBridge.terrainEndFrame();
 
             long frameEnd = System.nanoTime();

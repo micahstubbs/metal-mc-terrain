@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SkyFactory One - Windows Client Setup</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2rem;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    line-height: 1.6;
+  }
+  h1 { color: #4ecca3; border-bottom: 2px solid #4ecca3; padding-bottom: 0.5rem; }
+  h2 { color: #7ec8e3; margin-top: 2rem; }
+  h3 { color: #c4c4c4; }
+  a { color: #4ecca3; }
+  code {
+    background: #16213e;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #16213e;
+    padding: 1rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    border-left: 3px solid #4ecca3;
+  }
+  pre code { background: none; padding: 0; }
+  .step {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    border-left: 4px solid #4ecca3;
+  }
+  .step-number {
+    display: inline-block;
+    background: #4ecca3;
+    color: #1a1a2e;
+    width: 2rem;
+    height: 2rem;
+    line-height: 2rem;
+    text-align: center;
+    border-radius: 50%;
+    font-weight: bold;
+    margin-right: 0.5rem;
+  }
+  .warning {
+    background: #2d1b00;
+    border-left: 4px solid #e6a817;
+    padding: 1rem;
+    border-radius: 8px;
+    margin: 1rem 0;
+  }
+  .warning::before { content: "Warning: "; font-weight: bold; color: #e6a817; }
+  .info {
+    background: #0d2137;
+    border-left: 4px solid #7ec8e3;
+    padding: 1rem;
+    border-radius: 8px;
+    margin: 1rem 0;
+  }
+  .info::before { content: "Note: "; font-weight: bold; color: #7ec8e3; }
+  .controls {
+    background: #16213e;
+    padding: 1rem;
+    border-radius: 8px;
+    margin: 1rem 0;
+  }
+  .controls kbd {
+    background: #4ecca3;
+    color: #1a1a2e;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-weight: bold;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+  }
+  th, td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid #2a2a4a;
+  }
+  th { color: #4ecca3; }
+  .download-link {
+    display: inline-block;
+    background: #4ecca3;
+    color: #1a1a2e;
+    padding: 0.5rem 1.5rem;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: bold;
+    margin: 0.5rem 0;
+  }
+  .download-link:hover { background: #3db892; }
+</style>
+</head>
+<body>
+
+<h1>SkyFactory One - Windows Client Setup</h1>
+<p>Set up a Windows client to play SkyFactory One multiplayer with a Mac host running the Metal terrain renderer.</p>
+
+<h2>Requirements</h2>
+<table>
+  <tr><th>Component</th><th>Requirement</th></tr>
+  <tr><td>OS</td><td>Windows 10 or 11</td></tr>
+  <tr><td>Minecraft</td><td>Java Edition (purchased)</td></tr>
+  <tr><td>RAM</td><td>8 GB minimum (4 GB allocated to Minecraft)</td></tr>
+  <tr><td>Java</td><td>Installed automatically by CurseForge</td></tr>
+  <tr><td>Network</td><td>Same LAN as the host machine</td></tr>
+</table>
+
+<h2>Setup Steps</h2>
+
+<div class="step">
+  <h3><span class="step-number">1</span> Install CurseForge</h3>
+  <p>Download and install the CurseForge app:</p>
+  <p><a class="download-link" href="https://www.curseforge.com/download/app">Download CurseForge</a></p>
+  <p>Run the installer and sign in with your Microsoft account when prompted.</p>
+</div>
+
+<div class="step">
+  <h3><span class="step-number">2</span> Select Minecraft</h3>
+  <p>Open CurseForge and select <strong>Minecraft</strong> as your game. If this is your first time, CurseForge will detect or ask you to install the Minecraft launcher.</p>
+</div>
+
+<div class="step">
+  <h3><span class="step-number">3</span> Install SkyFactory One</h3>
+  <ol>
+    <li>Click <strong>Browse Modpacks</strong> in the left sidebar</li>
+    <li>Search for <strong>"SkyFactory One"</strong></li>
+    <li>Click on <strong>SkyFactory One</strong> by Darkosto</li>
+    <li>Click <strong>Install</strong></li>
+    <li>Wait for the download to complete (~200 MB, 109 mods)</li>
+  </ol>
+  <div class="info">SkyFactory One uses Minecraft 1.16.5 with Forge 36.2.34. CurseForge handles all of this automatically.</div>
+</div>
+
+<div class="step">
+  <h3><span class="step-number">4</span> Allocate More RAM</h3>
+  <p>SkyFactory One needs more RAM than the default 2 GB:</p>
+  <ol>
+    <li>In CurseForge, right-click the SkyFactory One instance</li>
+    <li>Click <strong>Profile Options</strong></li>
+    <li>Check the box for <strong>Memory Settings</strong> to override</li>
+    <li>Set <strong>Allocated Memory</strong> to <strong>4096 MB</strong> (or 6144 MB if you have 16+ GB RAM)</li>
+    <li>Click <strong>Done</strong></li>
+  </ol>
+</div>
+
+<div class="step">
+  <h3><span class="step-number">5</span> Launch the Game</h3>
+  <ol>
+    <li>Click <strong>Play</strong> on the SkyFactory One instance</li>
+    <li>Wait for Forge to load all 109 mods (first launch takes 2-5 minutes)</li>
+    <li>You should see the Minecraft main menu with the SkyFactory One logo</li>
+  </ol>
+</div>
+
+<div class="step">
+  <h3><span class="step-number">6</span> Connect to LAN Server</h3>
+  <p>Once the Mac host has opened a world to LAN:</p>
+  <ol>
+    <li>From the main menu, click <strong>Multiplayer</strong></li>
+    <li>The LAN game should appear automatically in the server list</li>
+    <li>If it doesn't appear, click <strong>Direct Connect</strong> and enter the host's IP and port (shown in the host's chat when they open to LAN)</li>
+  </ol>
+  <div class="info">The host opens to LAN from in-game: <strong>Esc</strong> &rarr; <strong>Open to LAN</strong> &rarr; choose settings &rarr; <strong>Start LAN World</strong>. The chat will show something like "Local game hosted on port 25565".</div>
+</div>
+
+<h2>Hosting from the Mac</h2>
+<p>On the Mac running the Metal terrain renderer:</p>
+<ol>
+  <li>Launch SkyFactory One (via CurseForge or the optimized <code>launch-skyfactory.sh</code>)</li>
+  <li>Create or load a SkyFactory world</li>
+  <li>Press <strong>Esc</strong> &rarr; <strong>Open to LAN</strong></li>
+  <li>Choose game mode and whether to allow cheats</li>
+  <li>Click <strong>Start LAN World</strong></li>
+  <li>Note the port number shown in chat</li>
+  <li>Tell the Windows player to connect to <code>192.168.4.222:&lt;port&gt;</code></li>
+</ol>
+
+<h2>Troubleshooting</h2>
+
+<h3>Can't see the LAN game</h3>
+<ul>
+  <li>Both machines must be on the same network/subnet</li>
+  <li>Check Windows Firewall: allow <code>javaw.exe</code> through (both inbound and outbound)</li>
+  <li>On Mac, check System Settings &rarr; Network &rarr; Firewall is not blocking Java</li>
+  <li>Try direct connect with the exact IP:port instead of relying on auto-discovery</li>
+</ul>
+
+<h3>Connection refused</h3>
+<ul>
+  <li>Verify the host has opened to LAN (check chat for the port message)</li>
+  <li>Ping the host from Windows: <code>ping 192.168.4.222</code></li>
+  <li>Ensure both clients are running the same SkyFactory One version</li>
+</ul>
+
+<h3>Mod mismatch / kicked on join</h3>
+<ul>
+  <li>Both machines must have the exact same modpack version installed</li>
+  <li>Do not add or remove mods on either side</li>
+  <li>The Metal terrain renderer mod is client-side only and does not affect compatibility</li>
+</ul>
+
+<h3>Out of memory / crashes</h3>
+<ul>
+  <li>Increase allocated RAM to 6144 MB in CurseForge profile options</li>
+  <li>Close other applications (browsers, etc.) to free RAM</li>
+  <li>If using Java arguments manually, set <code>-Xmx6G -Xms4G</code></li>
+</ul>
+
+<h3>Low FPS on Windows</h3>
+<ul>
+  <li>The Metal terrain renderer only works on macOS/Apple Silicon</li>
+  <li>On Windows, install <a href="https://optifine.net/downloads">OptiFine</a> for 1.16.5 for better FPS</li>
+  <li>Reduce render distance to 8-10 chunks</li>
+  <li>Turn off smooth lighting and fancy graphics</li>
+</ul>
+
+<h2>In-Game Controls (Mac Host Only)</h2>
+<div class="controls">
+  <table>
+    <tr><td><kbd>F6</kbd></td><td>Toggle profiler overlay (per-stage timing, GPU stats)</td></tr>
+    <tr><td><kbd>F8</kbd></td><td>Toggle Metal terrain on/off (A/B compare vs GL)</td></tr>
+  </table>
+  <p>These controls only apply to the Mac client running the Metal terrain renderer mod.</p>
+</div>
+
+<h2>Files on This Server</h2>
+<ul>
+  <li><a href="/launch-skyfactory.sh">launch-skyfactory.sh</a> - Optimized Mac launch script (arm64 + ZGC + Metal)</li>
+  <li><a href="/docs/microsoft-auth-error-400.md">Auth Error 400 debug steps</a></li>
+  <li><a href="/README.md">Project README</a></li>
+  <li><a href="/LLMs.md">AI Agent setup guide</a></li>
+</ul>
+
+</body>
+</html>

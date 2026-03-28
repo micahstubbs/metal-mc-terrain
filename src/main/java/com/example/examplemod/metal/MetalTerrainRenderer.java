@@ -175,36 +175,68 @@ public class MetalTerrainRenderer {
                 }
             }
 
-            // VertexBuffer.id (GL VBO name)
+            // VertexBuffer fields -- find by type, not by name, since SRG names vary.
+            // VertexBuffer has: int id (GL VBO name), int vertexCount, VertexFormat format
+            // We need both int fields. Identify them by examining their runtime values:
+            // id > 0 (GL name), vertexCount >= 0.
+            // Fallback: try named fields first.
             vboIdField = findField(VertexBuffer.class, "id", "field_177364_c");
-            if (vboIdField == null) {
-                // Try by type
+            vboVertexCountField = findField(VertexBuffer.class, "vertexCount", "field_177363_b");
+
+            // Verify the fields are actually int type (Forge may reorder/rename)
+            if (vboIdField != null && vboIdField.getType() != int.class) {
+                LOGGER.warn("[METAL-TERRAIN] vboIdField {} is type {}, not int - resetting",
+                    vboIdField.getName(), vboIdField.getType().getName());
+                vboIdField = null;
+            }
+            if (vboVertexCountField != null && vboVertexCountField.getType() != int.class) {
+                LOGGER.warn("[METAL-TERRAIN] vboVertexCountField {} is type {}, not int - resetting",
+                    vboVertexCountField.getName(), vboVertexCountField.getType().getName());
+                vboVertexCountField = null;
+            }
+
+            // If named fields failed, find all int fields on VertexBuffer
+            if (vboIdField == null || vboVertexCountField == null) {
+                java.util.List<Field> intFields = new java.util.ArrayList<>();
                 for (Field f : VertexBuffer.class.getDeclaredFields()) {
                     if (f.getType() == int.class) {
                         f.setAccessible(true);
-                        vboIdField = f;
-                        break;
+                        intFields.add(f);
                     }
+                }
+                LOGGER.info("[METAL-TERRAIN] Found {} int fields on VertexBuffer", intFields.size());
+                for (Field f : intFields) {
+                    LOGGER.info("[METAL-TERRAIN]   int field: {}", f.getName());
+                }
+                if (intFields.size() >= 2) {
+                    // field_177364_c = id (GL VBO name), field_177365_a = vertexCount
+                    // Order in getDeclaredFields may not match declaration order,
+                    // so identify by name if possible
+                    Field idCandidate = null, countCandidate = null;
+                    for (Field f : intFields) {
+                        if (f.getName().equals("field_177364_c") || f.getName().equals("id")) {
+                            idCandidate = f;
+                        } else if (f.getName().equals("field_177365_a") || f.getName().equals("vertexCount")) {
+                            countCandidate = f;
+                        }
+                    }
+                    if (idCandidate != null && countCandidate != null) {
+                        vboIdField = idCandidate;
+                        vboVertexCountField = countCandidate;
+                    } else {
+                        // Fallback: first = vertexCount (usually declared first), second = id
+                        vboIdField = intFields.get(1);
+                        vboVertexCountField = intFields.get(0);
+                    }
+                    LOGGER.info("[METAL-TERRAIN] vboIdField={}, vboVertexCountField={}",
+                        vboIdField.getName(), vboVertexCountField.getName());
+                } else if (intFields.size() == 1) {
+                    // Only one int field -- it's the id. vertexCount might be accessed differently.
+                    vboIdField = intFields.get(0);
+                    LOGGER.warn("[METAL-TERRAIN] Only 1 int field on VertexBuffer, vertexCount unavailable");
                 }
             }
             if (vboIdField != null) vboIdField.setAccessible(true);
-
-            // VertexBuffer.vertexCount
-            vboVertexCountField = findField(VertexBuffer.class, "vertexCount", "field_177363_b");
-            if (vboVertexCountField == null) {
-                // Second int field
-                int intCount = 0;
-                for (Field f : VertexBuffer.class.getDeclaredFields()) {
-                    if (f.getType() == int.class) {
-                        intCount++;
-                        if (intCount == 2) {
-                            f.setAccessible(true);
-                            vboVertexCountField = f;
-                            break;
-                        }
-                    }
-                }
-            }
             if (vboVertexCountField != null) vboVertexCountField.setAccessible(true);
 
             reflectionReady = (renderChunksField != null && vboIdField != null &&
@@ -412,6 +444,18 @@ public class MetalTerrainRenderer {
 
             int vboId = vboIdField.getInt(vbo);
             int vertexCount = vboVertexCountField.getInt(vbo);
+            if (frameCount == 15 && metalRT == RT_SOLID && chunkIndex == 0) {
+                LOGGER.info("[METAL-DIAG] First chunk: vboId={}, vertexCount={}", vboId, vertexCount);
+                // Dump ALL fields on this VBO for debugging
+                for (Field df : vbo.getClass().getDeclaredFields()) {
+                    try {
+                        df.setAccessible(true);
+                        Object val = df.get(vbo);
+                        LOGGER.info("[METAL-DIAG] VBO field '{}' type={} value={}",
+                            df.getName(), df.getType().getSimpleName(), val);
+                    } catch (Exception ignored) {}
+                }
+            }
             if (vboId <= 0 || vertexCount <= 0) { diagSkipId++; continue; }
 
             // Get chunk offset (camera-relative)
